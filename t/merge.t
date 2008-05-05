@@ -57,6 +57,30 @@ $obj->set_structure("type",    "array",  "/ul_append");
 $obj->set_structure("ordered", "0", "/ul_append");
 $obj->set_merge    ("merge","/ul_append","append");
 
+$obj->set_structure("type",    "array",  "/ol_keep2");
+$obj->set_structure("ordered", "1", "/ol_keep2");
+$obj->set_merge    ("merge","/ol_keep2","keep");
+
+$obj->set_structure("type",    "array",  "/ol_replace2");
+$obj->set_structure("ordered", "1", "/ol_replace2");
+$obj->set_merge    ("merge","/ol_replace2","replace");
+
+$obj->set_structure("type",    "array",  "/ol_merge2");
+$obj->set_structure("ordered", "1", "/ol_merge2");
+$obj->set_merge    ("merge","/ol_merge2","merge");
+
+$obj->set_structure("type",    "array",  "/ul_keep2");
+$obj->set_structure("ordered", "0", "/ul_keep2");
+$obj->set_merge    ("merge","/ul_keep2","keep");
+
+$obj->set_structure("type",    "array",  "/ul_replace2");
+$obj->set_structure("ordered", "0", "/ul_replace2");
+$obj->set_merge    ("merge","/ul_replace2","replace");
+
+$obj->set_structure("type",    "array",  "/ul_append2");
+$obj->set_structure("ordered", "0", "/ul_append2");
+$obj->set_merge    ("merge","/ul_append2","append");
+
 $nds = { 
         "h_keep"     => { "a"  => { "a1"  => "val_a1a",
                                     "a2"  => "val_a2a" },
@@ -79,6 +103,13 @@ $nds = {
         "ul_keep"    => [ "val_1a", "", "val_3a" ],
         "ul_replace" => [ "val_1a", "", "val_3a" ],
         "ul_append"  => [ "val_1a", "", "val_3a" ],
+
+        "ol_keep2"    => [ "val_1a", undef, "val_3a" ],
+        "ol_replace2" => [ "val_1a", undef, "val_3a" ],
+        "ol_merge2"   => [ "val_1a", undef, "val_3a" ],
+        "ul_keep2"    => [ "val_1a", undef, "val_3a" ],
+        "ul_replace2" => [ "val_1a", undef, "val_3a" ],
+        "ul_append2"  => [ "val_1a", undef, "val_3a" ],
        };
 
 $obj->nds("ele",$nds,1);
@@ -105,6 +136,13 @@ $nds = {
         "ul_keep"    => [ "val_1b", "val_2b", "" ],
         "ul_replace" => [ "val_1b", "val_2b", "" ],
         "ul_append"  => [ "val_1b", "val_2b", "" ],
+
+        "ol_keep2"    => [ "val_1b", "val_2b", undef ],
+        "ol_replace2" => [ "val_1b", "val_2b", undef ],
+        "ol_merge2"   => [ "val_1b", "val_2b", undef ],
+        "ul_keep2"    => [ "val_1b", "val_2b", undef ],
+        "ul_replace2" => [ "val_1b", "val_2b", undef ],
+        "ul_append2"  => [ "val_1b", "val_2b", undef ],
        };
 
 $obj->merge("ele",$nds,1);
@@ -184,6 +222,36 @@ $tests =
   [
     [ qw(/ul_append) ],
     [ qw(0 1 2 3 4 5 val_1a), "", qw(val_3a val_1b val_2b), "" ]
+  ],
+
+  [
+    [ qw(/ol_keep2) ],
+    [ qw(0 2 val_1a val_3a) ]
+  ],
+
+  [
+    [ qw(/ol_replace2) ],
+    [ qw(0 1 val_1b val_2b) ]
+  ],
+
+  [
+    [ qw(/ol_merge2) ],
+    [ qw(0 1 2 val_1a val_2b val_3a) ]
+  ],
+
+  [
+    [ qw(/ul_keep2) ],
+    [ qw(0 2 val_1a val_3a) ]
+  ],
+
+  [
+    [ qw(/ul_replace2) ],
+    [ qw(0 1 val_1b val_2b) ]
+  ],
+
+  [
+    [ qw(/ul_append2) ],
+    [ qw(0 2 3 4 val_1a val_3a val_1b val_2b) ]
   ],
 
 ];

@@ -62,7 +62,7 @@ $tests =
 
   [
     [ qw(ele /d/1 /d 1) ],
-    [ qw(0 1 2 3 -- 0 -- 0 1 2 3 alpha _undef_ gamma delta) ]
+    [ qw(0 1 2 3 -- 0 -- 0 2 3 alpha gamma delta) ]
   ],
 
 ];

@@ -7,38 +7,45 @@ package Data::NDS;
 # TODO
 ########################################################################
 
+# Add better support for empty values. A scalar or list element CAN
+# be "" or undef. If undef, it is empty. If "", it is valid. Empty
+# elements should be deleted:
+#    a hash key with a value of undef should be deleted
+#    a list element with a value of undef should be deleted if unordered
+#    a list consisting of only undefs should be deleted (and fix parent)
+#    a hash with no keys should be deleted (and fix parent)
+
 # Add validity tests for data
 # see Data::Domain, Data::Validator
 
-# Add identical (to see if two NDSes are identical), contains (to
-# see if all non-empty parts in one NDS are identical to those in
-# the other)
-# see Data::Validate::XSD
-
 # Add subtract (to remove items in one NDS from another)
 # see Data::Validate::XSD
-
-# Add search (to return paths to data that match certain criteria)
-# see Data::Search
+# treats all lists as ordered... its' simply too complicated
+# otherwise
 
 # Add clean (to remove empty paths)
 
-########################################################################
-# HISTORY
-########################################################################
-
-# Version 1.00   2008-02-27
-#    Initial release
-
-$VERSION = "1.00";
+# Add ability to ignore structural information so that lists can
+# be unordered and non-uniform ???
 
 ########################################################################
 
 require 5.000;
 use strict;
 use Storable qw(dclone);
+use Algorithm::Permute;
+use IO::File;
+use warnings;
 
 use vars qw($VERSION);
+$VERSION = "1.01";
+
+use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
+$_DBG        = 0;
+$_DBG_INDENT = 0;
+$_DBG_OUTPUT = "dbg.out";
+$_DBG_FH     = ();
+$_DBG_POINT  = 0;
 
 ###############################################################################
 # BASE METHODS
@@ -52,8 +59,11 @@ use vars qw($VERSION);
 #   structure => FLAG                                    whether to do structure
 #   struct    => { PATH       => { ITEM => VAL } }       structural information
 #   defstruct => { ITEM       => VAL }                   default structure
-#   merge     => { RULESET    => { PATH   => VAL } }     per path merge methods
-#   defmerge  => { RULESET    => { ITEM   => VAL } }     default merge methods
+#   ruleset   => { RULESET    => { def  => { ITEM => VAL },
+#                                  path => { PATH => VAL } } }
+#                                                        default and path
+#                                                        specific ruleset
+#                                                        merge methods
 # }
 
 sub new {
@@ -66,8 +76,7 @@ sub new {
               "structure" => 1,
               "struct"    => {},
               "defstruct" => {},
-              "merge"     => {},
-              "defmerge"  => {},
+              "ruleset"   => {},
              };
   _structure_defaults($self);
   _merge_defaults($self);
@@ -102,11 +111,21 @@ sub _warn {
 
 sub ruleset {
    my($self,$name) = @_;
-   return 3  if ($name eq "keep"  ||  $name eq "replace");
+   return 3  if ($name eq "keep"     ||
+                 $name eq "replace"  ||
+                 $name eq "default"  ||
+                 $name eq "override"
+                );
    return 1  if ($name !~ /^[a-zA-Z0-9]+$/);
-   return 2  if (exists $$self{"merge"}{$name});
-   $$self{"merge"}{$name} = {};
-   $$self{"defmerge"}{$name} = {};
+   return 2  if (exists $$self{"ruleset"}{$name});
+   $$self{"ruleset"}{$name} = { "def"  => {},
+                                "path" => {} };
+   return 0;
+}
+
+sub ruleset_valid {
+   my($self,$name) = @_;
+   return 1  if (exists $$self{"ruleset"}{$name});
    return 0;
 }
 
@@ -132,7 +151,7 @@ sub path {
             $path eq $delim) {
       @path = ();
    } else {
-      $path      =~ s/^\Q$delim\E//;
+      $path   =~ s/^\Q$delim\E//;
       @path   = split(/\Q$delim\E/,$path);
    }
 
@@ -164,8 +183,9 @@ sub nds {
    #
 
    if ($nds eq "_delete") {
-      delete $$self{"nds"}{$name}  if (exists $$self{"nds"}{$name});
-      return;
+      delete $$self{"nds"}{$name}, return 1
+        if (exists $$self{"nds"}{$name});
+      return 0;
    }
 
    #
@@ -188,8 +208,19 @@ sub nds {
    }
 }
 
+sub _nds {
+   my($self,$nds) = @_;
+
+   if (defined $nds  &&  exists $$self{"nds"}{$nds}) {
+      return $$self{"nds"}{$nds};
+   } else {
+      return $nds;
+   }
+}
+
 sub empty {
    my($self,$nds) = @_;
+   $nds = _nds($self,$nds);
    return _empty($nds);
 }
 
@@ -213,10 +244,6 @@ sub _empty {
       }
       return 1;
 
-   } elsif (! ref($nds)) {
-      return 1  if ($nds eq "");
-      return 0;
-
    } else {
       return 0;
    }
@@ -228,6 +255,7 @@ sub _empty {
 
 sub keys {
    my($self,$nds,$path) = @_;
+   $nds = _nds($self,$nds);
    my($valid,$val) = $self->valid($nds,$path);
 
    return undef  if (! $valid);
@@ -236,10 +264,18 @@ sub keys {
       return ();
 
    } elsif (ref($val) eq "ARRAY") {
-      return (0..$#$val);
+      my(@ret);
+      foreach my $i (0..$#$val) {
+         push(@ret,$i)  if (! _empty($$val[$i]));
+      }
+      return @ret;
 
    } elsif (ref($val) eq "HASH") {
-      return sort (CORE::keys %$val);
+      my(@ret);
+      foreach my $key (sort(CORE::keys %$val)) {
+         push(@ret,$key)  if (! _empty($$val{$key}));
+      }
+      return @ret;
 
    } else {
       return undef;
@@ -248,6 +284,7 @@ sub keys {
 
 sub values {
    my($self,$nds,$path) = @_;
+   $nds = _nds($self,$nds);
    my($valid,$val) = $self->valid($nds,$path);
 
    return undef  if (! $valid);
@@ -256,10 +293,18 @@ sub values {
       return ($val);
 
    } elsif (ref($val) eq "ARRAY") {
-      return @$val;
+      my(@ret);
+      foreach my $i (0..$#$val) {
+         push(@ret,$$val[$i])  if (! _empty($$val[$i]));
+      }
+      return @ret;
 
    } elsif (ref($val) eq "HASH") {
-      return sort (CORE::values %$val);
+      my(@ret);
+      foreach my $key (sort(CORE::keys %$val)) {
+         push(@ret,$$val{$key})  if (! _empty($$val{$key}));
+      }
+      return @ret;
 
    } else {
       return undef;
@@ -267,22 +312,27 @@ sub values {
 }
 
 ###############################################################################
-# VALID
+# VALID/VALUE
 ###############################################################################
 # Checks to see if a path is valid in an NDS
 
 sub valid {
    my($self,$nds,$path) = @_;
+   $nds = _nds($self,$nds);
    my($delim) = $self->delim();
    my @path   = $self->path($path);
-   if (! ref($nds)) {
-      $nds = $self->nds($nds);
-   }
+
    if (! ref($nds)) {
       return (0,-1);
    }
 
    return _valid($nds,$delim,"",@path);
+}
+
+sub value {
+   my($valid,$val) = valid(@_);
+   return undef  if (! $valid);
+   return $val;
 }
 
 sub _valid {
@@ -299,7 +349,7 @@ sub _valid {
    #
 
    my $p = shift(@path);
-   $path = ($path ? join($delim,$path,$p) : "/$p");
+   $path = ($path ? join($delim,$path,$p) : "$delim$p");
 
    #
    # Handle the case where $nds is a scalar, or not
@@ -351,25 +401,22 @@ sub _valid {
 
 sub merge {
    my($self,$nds1,$nds2,@args) = @_;
+   return  if (! defined $nds2);
 
    #
    # Get nds1 and nds2 by reference or name
    #
 
-   if (! ref($nds1)) {
-      $nds1 = $self->nds($nds1);
-      if (! defined($nds1)) {
-         _warn($self,"[merge] NDS1 undefined: $nds1");
-         return 1;
-      }
+   $nds1 = _nds($self,$nds1);
+   if (! defined($nds1)) {
+      _warn($self,"[merge] NDS1 undefined: $nds1");
+      return 1;
    }
 
-   if (! ref($nds2)) {
-      $nds2 = $self->nds($nds2);
-      if (! defined($nds2)) {
-         _warn($self,"[merge] NDS2 undefined: $nds2");
-         return 1;
-      }
+   $nds2 = _nds($self,$nds2);
+   if (! defined($nds2)) {
+      _warn($self,"[merge] NDS2 undefined: $nds2");
+      return 1;
    }
 
    #
@@ -392,7 +439,7 @@ sub merge {
 
    } elsif ($#args == 1) {
       $ruleset = $args[0];
-      $ruleset = $args[1];
+      $new     = $args[1];
 
    } else {
       die "[merge] Unknown argument list";
@@ -411,7 +458,14 @@ sub merge {
    # Merge
    #
 
-   $nds1 = _merge($self,$nds1,$nds2,[],$ruleset);
+   my $tmp = _merge($self,$nds1,$nds2,[],$ruleset);
+   if (ref($nds1) eq "HASH") {
+      %$nds1 = %$tmp;
+   } elsif (ref($nds1) eq "ARRAY") {
+      @$nds1 = @$tmp;
+   } else {
+      return 5;
+   }
    return 0;
 }
 
@@ -421,11 +475,12 @@ sub _merge {
 
    #
    # If $nds2 is empty, we'll always return whatever $nds1 is.
-   # If $nds1 is empty, we'll always return a copy of whatever $nds2 is.
+   # If $nds1 is empty or "", we'll always return a copy of whatever $nds2 is.
    #
 
    return $nds1  if ($self->empty($nds2));
-   if ($self->empty($nds1)) {
+   if ($self->empty($nds1)  ||
+       (! ref($nds1)  &&  $nds1 eq "")) {
       if (ref($nds2)) {
          return dclone($nds2);
       } else {
@@ -493,10 +548,17 @@ sub _merge_hashes {
    my($self,$method,$val1,$val2,$pathref,$ruleset) = @_;
 
    foreach my $key (CORE::keys %$val2) {
+
+      #
+      # If $val2 is empty, we'll keep $val1
+      # If $val1 is empty or "", we'll always set it to $val2
+      #
+
       next  if ($self->empty($$val2{$key}));
 
       if (! exists $$val1{$key}  ||
-          $self->empty($$val1{$key})) {
+          $self->empty($$val1{$key})  ||
+          (! ref($$val1{$key})  &&  $$val1{$key} eq "")) {
          if (ref($$val2{$key})) {
             $$val1{$key} = dclone($$val2{$key});
          } else {
@@ -532,13 +594,14 @@ sub _merge_lists {
       # val1[i]  val2[i]
       # -------  -------
       # *        empty      do nothing
-      # empty    *          val1[i] = val2[i]
+      # empty/'' *          val1[i] = val2[i]
       # *        *          recurse into (including scalars)
 
       if ($self->empty($$val2[$i])) {
          next;
 
-      } elsif ($self->empty($$val1[$i])) {
+      } elsif ($self->empty($$val1[$i])  ||
+               (! ref($$val1[$i])  &&  $$val1[$i] eq "")) {
          if (ref($$val2[$i])) {
             $$val1[$i] = dclone($$val2[$i]);
          } else {
@@ -987,7 +1050,7 @@ sub _set_merge_path {
    my @path = $self->path($path);
    $path    = $self->path(\@path);
 
-   if (exists $$self{"merge"}{$ruleset}{$path}) {
+   if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path}) {
       _warn($self,"[set_merge] Method already set for path: $path");
       return 120;
    }
@@ -1030,7 +1093,7 @@ sub _set_merge_path {
 
    # Set the method
 
-   $$self{"merge"}{$ruleset}{$path} = $method;
+   $$self{"ruleset"}{$ruleset}{"path"}{$path} = $method;
    return 0;
 }
 
@@ -1073,7 +1136,7 @@ sub _set_merge_path {
          _warn($self,"[set_merge_default] Invalid value for default: $item = $val");
          return $err;
       }
-      $$self{"defmerge"}{$ruleset}{$item} = $val;
+      $$self{"ruleset"}{$ruleset}{"def"}{$item} = $val;
       return 0;
    }
 
@@ -1082,10 +1145,33 @@ sub _set_merge_path {
       my($self) = @_;
 
       foreach my $key (CORE::keys %def) {
-         $$self{"defmerge"}{"*"}{$key} = $def{$key}[1];
-         $$self{"defmerge"}{"keep"}{$key} = "keep";
-         $$self{"defmerge"}{"replace"}{$key} = "replace";
+         $$self{"ruleset"}{"*"}{"def"}{$key} = $def{$key}[1];
       }
+
+      $$self{"ruleset"}{"keep"}{"def"} =
+        { "merge_hash"   => "keep",
+          "merge_ol"     => "keep",
+          "merge_ul"     => "keep",
+          "merge_scalar" => "keep" };
+
+      $$self{"ruleset"}{"replace"}{"def"} =
+        { "merge_hash"   => "replace",
+          "merge_ol"     => "replace",
+          "merge_ul"     => "replace",
+          "merge_scalar" => "replace" };
+
+      $$self{"ruleset"}{"default"}{"def"} =
+        { "merge_hash"   => "merge",
+          "merge_ol"     => "merge",
+          "merge_ul"     => "keep",
+          "merge_scalar" => "keep" };
+
+      $$self{"ruleset"}{"override"}{"def"} =
+        { "merge_hash"   => "merge",
+          "merge_ol"     => "merge",
+          "merge_ul"     => "replace",
+          "merge_scalar" => "replace" };
+
    }
 
    sub _merge_allowed {
@@ -1203,27 +1289,27 @@ sub get_merge {
 
    # Check ruleset
 
-   return $$self{"merge"}{$ruleset}{$path}
-     if (exists $$self{"merge"}{$ruleset}{$path});
+   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
+     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
 
    my $type    = $self->get_structure($path,"type");
    my $ordered = $self->get_structure($path,"ordered");
 
    if ($type eq "hash") {
-      return $$self{"defmerge"}{$ruleset}{"merge_hash"}
-        if (exists $$self{"defmerge"}{$ruleset}{"merge_hash"});
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"});
 
    } elsif ($type eq "array"  &&  $ordered) {
-      return $$self{"defmerge"}{$ruleset}{"merge_ol"}
-        if (exists $$self{"defmerge"}{$ruleset}{"merge_ol"});
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"});
 
    } elsif ($type eq "array") {
-      return $$self{"defmerge"}{$ruleset}{"merge_ul"}
-        if (exists $$self{"defmerge"}{$ruleset}{"merge_ul"});
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"});
 
    } elsif ($type eq "scalar"  ||  $type eq "other") {
-      return $$self{"defmerge"}{$ruleset}{"merge_scalar"}
-        if (exists $$self{"defmerge"}{$ruleset}{"merge_scalar"});
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"});
 
    } else {
       return "";
@@ -1233,20 +1319,20 @@ sub get_merge {
 
    $ruleset = "*";
 
-   return $$self{"merge"}{$ruleset}{$path}
-     if (exists $$self{"merge"}{$ruleset}{$path});
+   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
+     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
 
    if ($type eq "hash") {
-      return $$self{"defmerge"}{$ruleset}{"merge_hash"};
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"};
 
    } elsif ($type eq "array"  &&  $ordered) {
-      return $$self{"defmerge"}{$ruleset}{"merge_ol"};
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"};
 
    } elsif ($type eq "array") {
-      return $$self{"defmerge"}{$ruleset}{"merge_ul"};
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"};
 
    } elsif ($type eq "scalar"  ||  $type eq "other") {
-      return $$self{"defmerge"}{$ruleset}{"merge_scalar"};
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"};
    }
 }
 
@@ -1258,6 +1344,7 @@ sub get_merge {
 
 sub check_structure {
    my($self,$nds,$new) = @_;
+   $nds = _nds($self,$nds);
    return (0,"")  if (! $$self{"structure"});
    $new = 0  if (! $new);
 
@@ -1378,12 +1465,10 @@ sub merge_path {
    # Get nds by reference or name
    #
 
-   if (! ref($nds)) {
-      $nds = $self->nds($nds);
-      if (! defined($nds)) {
-         _warn($self,"[merge_path] NDS undefined: $nds");
-         return 1;
-      }
+   $nds = _nds($self,$nds);
+   if (! defined($nds)) {
+      _warn($self,"[merge_path] NDS undefined: $nds");
+      return 1;
    }
 
    #
@@ -1406,7 +1491,7 @@ sub merge_path {
 
    } elsif ($#args == 1) {
       $ruleset = $args[0];
-      $ruleset = $args[1];
+      $new     = $args[1];
 
    } else {
       die "[merge_path] Unknown argument list";
@@ -1500,12 +1585,10 @@ sub erase {
    # Get the NDS
    #
 
-   if (! ref($nds)) {
-      $nds = $self->nds($nds);
-      if (! defined($nds)) {
-         _warn($self,"[erase] NDS undefined: $nds");
-         return 1;
-      }
+   $nds = _nds($self,$nds);
+   if (! defined($nds)) {
+      _warn($self,"[erase] NDS undefined: $nds");
+      return 1;
    }
 
    #
@@ -1568,16 +1651,31 @@ sub erase {
 
 sub identical {
    my($self,$nds1,$nds2,@args) = @_;
-   return _identical_contains($self,$nds1,$nds2,1,@args);
+   $nds1 = _nds($self,$nds1);
+   $nds2 = _nds($self,$nds2);
+   _DBG_begin("Identical");
+
+   my $flag = _identical_contains($self,$nds1,$nds2,1,@args);
+
+   _DBG_end($flag);
+   return $flag;
 }
 
 sub contains {
    my($self,$nds1,$nds2,@args) = @_;
-   return _identical_contains($self,$nds1,$nds2,0,@args);
+   $nds1 = _nds($self,$nds1);
+   $nds2 = _nds($self,$nds2);
+   _DBG_begin("Contains");
+
+   my $flag = _identical_contains($self,$nds1,$nds2,0,@args);
+
+   _DBG_end($flag);
+   return $flag;
 }
 
 sub _identical_contains {
    my($self,$nds1,$nds2,$identical,@args) = @_;
+   _DBG_enter("_identical_contains");
 
    #
    # Parse $new and $path
@@ -1606,20 +1704,16 @@ sub _identical_contains {
    # Get nds1 and nds2 by reference or name
    #
 
-   if (! ref($nds1)) {
-      $nds1 = $self->nds($nds1);
-      if (! defined($nds1)) {
-         _warn($self,"[identical/contains] NDS1 undefined: $nds1");
-         return 1;
-      }
+   if (! defined($nds1)) {
+      _warn($self,"[identical/contains] NDS1 undefined: $nds1");
+      _DBG_leave("ERROR NDS1 undefined");
+      return 1;
    }
 
-   if (! ref($nds2)) {
-      $nds2 = $self->nds($nds2);
-      if (! defined($nds2)) {
-         _warn($self,"[identical/contains] NDS2 undefined: $nds2");
-         return 1;
-      }
+   if (! defined($nds2)) {
+      _warn($self,"[identical/contains] NDS2 undefined: $nds2");
+      _DBG_leave("ERROR NDS2 undefined");
+      return 1;
    }
 
    #
@@ -1627,9 +1721,16 @@ sub _identical_contains {
    #
 
    my ($err,$val) = $self->check_structure($nds1,$new);
-   return undef  if ($err);
+   if ($err) {
+      _DBG_leave("ERROR check_structure 1");
+      return undef;
+   }
+
    ($err,$val) = $self->check_structure($nds2,$new);
-   return undef  if ($err);
+   if ($err) {
+      _DBG_leave("ERROR check_structure 2");
+      return undef;
+   }
 
    #
    # Handle $path
@@ -1639,177 +1740,297 @@ sub _identical_contains {
    if ($path) {
       my($valid,$where);
       ($valid,$nds1,$where) = $self->valid($nds1,$path);
-      return undef  if (! $valid);
+      if (! $valid) {
+         _DBG_leave("ERROR invalid 1");
+         return undef;
+      }
 
       ($valid,$nds2,$where) = $self->valid($nds2,$path);
-      return undef  if (! $valid);
+      if (! $valid) {
+         _DBG_leave("ERROR invalid 2");
+         return undef;
+      }
 
       @path = $self->path($path);
       $path = $self->path($path);
    }
 
    #
-   # Recurse through the structure and create a hash of PATH => DESC
-   # for every non-empty scalar.
+   # We will now recurse through the data structure and get an
+   # mpath description.
+   #
+   # An mpath description will be stored as:
+   #   %desc = ( MPATH  => DESC )
+   #
+   # An MPATH is related to a PATH, except that every path element that
+   # contains an index for an unordered list is transformed to illustrate
+   # this. For example, for the path:
+   #   /foo/1/bar/2
+   # the mpath is:
+   #   /foo/_ul_1/bar/_ul_2
+   # (assuming that the 2nd and 4th elements are indices in unorderd
+   #lists).
    #
 
-   my(%scalar1,%scalar2);
-   _ic_scalars($self,$nds1,\%scalar1,[@path],[@path]);
-   _ic_scalars($self,$nds2,\%scalar2,[@path],[@path]);
+   my(%desc1,%desc2);
+   _ic_desc($self,$nds1,\%desc1,[@path],[@path],0,$self->delim());
+   _ic_desc($self,$nds2,\%desc2,[@path],[@path],0,$self->delim());
 
    #
-   # One trivial case... if %scalar2 is bigger than %scalar1, it isn't
-   # contained in it. If they are not equal in size, they can't be
-   # identical.
+   # Now check these description hashes to see if they are identical
+   # (or contained). This is done recusively.
    #
 
-   my @k1 = CORE::keys %scalar1;
-   my @k2 = CORE::keys %scalar2;
-   if ($identical) {
-      return 0  if ($#k1 != $#k2);
-   } else {
-      return 0  if ($#k1 < $#k2);
+   my $flag = _ic_compare($self,\%desc1,\%desc2,$identical,$self->delim());
+   _DBG_leave($flag);
+   return $flag;
+}
+
+# This compares all elements of two description hashes to see if
+# they are identical, or if the second is contained in the first.
+#
+sub _ic_compare {
+   my($self,$desc1,$desc2,$identical,$delim) = @_;
+   _DBG_enter("_ic_compare");
+   if ($_DBG) {
+      _DBG_line("DESC1 =");
+      foreach my $mpath (sort(CORE::keys %$desc1)) {
+         my $val = $$desc1{$mpath}{"val"} .
+           "  [" . join(" ",@{ $$desc1{$mpath}{"meles"} }) . "]";
+         _DBG_line("   $mpath\t= $val");
+      }
+      _DBG_line("DESC2 =");
+      foreach my $mpath (sort(CORE::keys %$desc2)) {
+         my $val = $$desc2{$mpath}{"val"} .
+           "  [" . join(" ",@{ $$desc2{$mpath}{"meles"} }) . "]";
+         _DBG_line("   $mpath\t= $val");
+      }
    }
 
    #
-   # Get a hash of PATH => 1 for every PATH which contains an
-   # unordered list index of the form _ul_i .
+   # Separate %desc into two sections. Move everything containing any
+   # unordered list induces to %ul.  %desc will end up containing
+   # everything else (which is handled very simply).
    #
 
    my(%ul1,%ul2);
-   _ic_ul($self,\%scalar1,\%ul1);
-   _ic_ul($self,\%scalar2,\%ul2);
+   _ic_ul($desc1,\%ul1);
+   _ic_ul($desc2,\%ul2);
 
    #
-   # Do the easy part... elements with no unordered lists. All in %scalar2
-   # must be in %scalar1. Also, for identical tests, all in %scalar1 must
-   # be in %scalar2.
+   # One trivial case... if %desc2 is bigger than %desc1, (or %ul2
+   # is bigger than %ul1) it isn't contained in it. If they are not
+   # equal in size, they can't be identical.
    #
 
-   foreach my $path (@k2) {
-      next  if (exists $ul2{$path});
-      if (exists $scalar1{$path}  &&
-          $scalar1{$path}{"val"} eq $scalar2{$path}{"val"}) {
-         delete $scalar1{$path};
-         delete $scalar2{$path};
+   my @d1 = CORE::keys %$desc1;
+   my @d2 = CORE::keys %$desc2;
+   my @u1 = CORE::keys %ul1;
+   my @u2 = CORE::keys %ul2;
+   if ($identical) {
+      _DBG_leave("Not equal"), return 0  if ($#d1 != $#d2  ||
+                                            $#u1 != $#u2);
+   } else {
+      _DBG_leave("Bigger"),    return 0  if ($#d1 < $#d2  ||
+                                            $#u1 < $#u2);
+   }
+
+   #
+   # Do the easy part... elements with no unordered lists. All in
+   # %desc2 must be in %desc1. For identical tests, nothing else
+   # can exist.
+   #
+
+   foreach my $mpath (@d2) {
+      if (exists $$desc1{$mpath}  &&
+          $$desc1{$mpath}{"val"} eq $$desc2{$mpath}{"val"}) {
+         delete $$desc1{$mpath};
+         delete $$desc2{$mpath};
          next;
       } else {
+         _DBG_leave("Desc differs");
          return 0;
       }
    }
 
-   if ($identical) {
-      foreach my $path (@k1) {
-         next  if (exists $ul1{$path});
-         if (exists $scalar2{$path}  &&
-             $scalar1{$path}{"val"} eq $scalar2{$path}{"val"}) {
-            delete $scalar1{$path};
-            delete $scalar2{$path};
-            next;
-         } else {
-            return 0;
+   @d1 = CORE::keys %$desc1;
+   _DBG_leave("Desc not equal"), return 0  if ($identical  &&  @d1);
+
+   #
+   # Now do elements containing unordered lists.
+   #
+
+   if ($#u2 == -1) {
+      _DBG_leave("UL not identical"), return 0  if ($identical  &&  $#u1 > -1);
+      _DBG_leave(1);
+      return 1;
+   }
+   my $flag = _ic_compare_ul($self,\%ul1,\%ul2,$identical,$delim);
+   _DBG_leave($flag);
+   return $flag;
+}
+
+# This recurses through %ul1 and %ul2 to try all possible combinations
+# of indices for unordered elements. At every level of recusion, we do
+# the left-most set of indices.
+#
+sub _ic_compare_ul {
+   my($self,$ul1,$ul2,$identical,$delim) = @_;
+   _DBG_enter("_ic_compare_ul");
+   if ($_DBG) {
+      _DBG_line("UL1 =");
+      foreach my $mpath (sort(CORE::keys %$ul1)) {
+         my $val = $$ul1{$mpath}{"val"} .
+           "  [" . join(" ",@{ $$ul1{$mpath}{"meles"} }) . "]";
+         _DBG_line("   $mpath\t= $val");
+      }
+      _DBG_line("UL2 =");
+      foreach my $mpath (sort(CORE::keys %$ul2)) {
+         my $val = $$ul2{$mpath}{"val"} .
+           "  [" . join(" ",@{ $$ul2{$mpath}{"meles"} }) . "]";
+         _DBG_line("   $mpath\t= $val");
+      }
+   }
+
+   #
+   # We need to get a list of all similar mpaths up to this level.
+   # To determine if two mpaths are similar, look at the first element
+   # in @meles in each.
+   #
+   # If both are unordered list indices (not necessarily identical) or
+   # both are NOT unordered list indices and are identical, then they
+   # are similar.
+   #
+
+ COMPARE: while (1) {
+      my @mpath2 = CORE::keys %$ul2;
+      last COMPARE  if (! @mpath2);
+
+      #
+      # Look at the first element in @meles in one of the $ul entries.
+      # It will either be an unordered list index or a set of 1 or more
+      # path elements which do NOT contain unordered list indices.
+      #
+
+      my $mpath = $mpath2[0];
+      my $mele  = $$ul2{$mpath}{"meles"}[0];
+
+      if ($mele =~ /^_ul_/) {
+
+         # Get a list of all elements with a first $mele an _ul_ and
+         # move them to a temporary description hash.
+
+         my(%tmp1,%tmp2);
+         _ic_ul2desc($ul1,\%tmp1,$mele,1);
+         _ic_ul2desc($ul2,\%tmp2,$mele,1);
+
+         # Find the number of unique $mele in %ul1 and %ul2 .  If
+         # the number in %ul2 is greater, it can't be contained. It
+         # can't be identical unless the two numbers are the same.
+
+         my $max1 = _ic_max_idx(\%tmp1);
+         my $max2 = _ic_max_idx(\%tmp2);
+
+         _DBG_leave("Bigger"),    return 0  if ($max2 > $max1);
+         _DBG_leave("Not equal"), return 0  if ($identical  &&  $max1 != $max2);
+
+         # Copy all elements from %ul1 to %desc1, but change them
+         # from _ul_I to J (where J is 0..MAX)
+         #
+         # After we set a combination, we need to reset MELES.
+
+         my $desc1 = {};
+         _ic_permutation(\%tmp1,$desc1,(0..$max1));
+         foreach my $mp (CORE::keys %$desc1) {
+            $$desc1{$mp}{"meles"} = _ic_mpath2meles($self,$mp,$delim);
          }
-      }
-   } else {
-      # If we're doing "contains", remove all entries that have no unordered lists
-      # that are left in %scalar1.
-      foreach my $path (@k1) {
-         next  if (exists $ul1{$path});
-         delete $scalar1{$path};
-      }
-   }
 
-   #
-   # We're left only with elements containing unordered lists. Compare them.
-   #
+         # Try every combination of the elements in %ul2 setting
+         # _ul_I to J (where J is 1..MAX and MAX comes from %ul1)
 
+         # For some reason (a bug in Algorigthm::Permute???) the
+         # recursion here is causing unpredictable behaviors. We'll
+         # get a list of all combinations and store them here to
+         # avoid the problem.
+         my $p = new Algorithm::Permute([0..$max1],$max2+1);
 
+         while (my(@idx) = $p->next) {
 
+            my $d1 = {};
+            my $d2 = {};
+            $d1 = dclone($desc1);
+            _ic_permutation(\%tmp2,$d2,@idx);
+            foreach my $mp (CORE::keys %$d2) {
+               $$d2{$mp}{"meles"} = _ic_mpath2meles($self,$mp,$delim);
+            }
 
+            next COMPARE
+              if (_ic_compare($self,$d1,$d2,$identical,$delim));
+         }
 
+         _DBG_leave("Unordered list fails");
+         return 0;
 
-
-   #
-   # We want to get a hash of all elements containing exactly the same
-   # path elements (except for unordered list elements).
-   #
-   #    %scalar = ( PATH  => { val   => VAL,
-   #                           p     => [ @PATH ],
-   #                           mpath => MPATH
-   #                         } )
-   #    %mpath  = ( MPATH => [ PATH, PATH, ... ] )
-   #
-   # where:
-   #
-   #    PATH     : the full path to a scalar        /a/_ul_4/b/_ul_3)
-   #    @PATH    : the split path                   a, _ul_4, b, _ul_3
-   #    MPATH    : the modified path                /a/*/b/*
-   #
-
-   my(%mpath1,%mpath2);
-   _ic_mpath(\%scalar1,\%mpath1);
-   _ic_mpath(\%scalar2,\%mpath2);
-
-   #
-   # Compare each set of identically structured elements.
-   #
-
-   foreach my $key (CORE::keys %mpath1) {
-      return 0  if (! exists $mpath2{$key});
-
-      my @path1 = @{ $mpath1{$key} };
-      my @path2 = @{ $mpath2{$key} };
-      if ($identical) {
-         return 0  if ($#path1 != $#path2);
       } else {
-         return 0  if ($#path1 < $#path2);
+
+         #
+         # Not an unordered list.
+         #
+         # Go through all %ul mpaths and take all elements which
+         # have the same leading $mele and move them to a new
+         # %desc hash. Then compare the two %desc hashes.
+         #
+
+         my(%desc1,%desc2);
+         _ic_ul2desc($ul1,\%desc1,$mele,0);
+         _ic_ul2desc($ul2,\%desc2,$mele,0);
+
+         _DBG_leave("Desc fails"), return 0
+           if (! _ic_compare($self,\%desc1,\%desc2,$identical,$delim));
+
       }
-
-      #
-      # Make a list of:
-      #   @list = ( [X,Y,...], [VAL1, VAL2, ...], [] ... )
-      # where X, Y, ..., are indices of the unordered lists elements
-      # (except for the last one), VAL1, VAL2, ... are the values
-      #
-
-      %ul1 = ();
-      %ul2 = ();
-
-
-#       my $flag;
-#       if ($identical) {
-#          $flag = _ic_identical(\%scalar1,$mpath1{$key},\%scalar2,$mpath2{$key});
-#       } else {
-#          $flag = _ic_contains(\%scalar1,$mpath1{$key},\%scalar2,$mpath2{$key});
-#       }
-#       return 0  if (! $flag);
-
-      delete $mpath1{$key};
-      delete $mpath2{$key};
    }
 
-   return 0  if (CORE::keys %mpath2);
+   my @mpath1 = CORE::keys %$ul1;
+   _DBG_leave("Remaining items fail"), return 0  if (@mpath1  &&  $identical);
+   _DBG_leave(1);
    return 1;
 }
 
-# This creates a description of every path containing a scalar. The
-# description includes the following:
-#    { val    => VAL           the scalar at the path
-#      mpath  => MPATH         a modified path (/a/_ul_1 instead of /a/1)
-#      path   => [ @PATH ]     path in list format
+# This recurses through a data structure and creates a description of
+# every path containing a scalar. The description is a hash of the
+# form:
 #
-# We have to keep two copies of the path... one with the actual path
-# information:
-#    /a/1/b
-# and one with the modified path:
-#    /a/_ul_1/b
+# %desc =
+#    ( MPATH =>
+#       { val    => VAL           the scalar at the path
+#         path   => PATH          the actual path         /a/1
+#         mpath  => MPATH         the modified path       /a/_ul_1
+#         ul     => N             the number of unordered indices in mpath
+#         meles  => MELES         a list of modified elements (see below)
+#         mele   => MELE          the part of MELES currently being examined
+#       }
+#    )
 #
-sub _ic_scalars {
-   my($self,$nds,$hashref,$mpath,$path) = @_;
+# Ths MELES list is a list of "elements" where can be combined to form the
+# mpath (using the delimiter). Each element of MELES is either an index of
+# an unordered list or all adjacent path elements which are not unordered
+# list indices. For example, the mpath:
+#     /a/_ul_1/b/c/_ul_3/_ul_4
+# would become the following MELES
+#     [ a, _ul_1, b/c, _ul_3, _ul_4 ]
+#
+# We'll pass both the path and mpath (as listrefs) as arguments as well
+# as a flag whether or not we've had any unordered elements in the path
+# to this point.
+#
+sub _ic_desc {
+   my($self,$nds,$desc,$mpath,$path,$ul,$delim) = @_;
 
    if (ref($nds) eq "HASH") {
       foreach my $key (CORE::keys %$nds) {
-         _ic_scalars($self,$$nds{$key},$hashref,[@$mpath,$key],[@$path,$key]);
+         _ic_desc($self,$$nds{$key},$desc,[@$mpath,$key],[@$path,$key],$ul,
+                  $delim);
       }
 
    } elsif (ref($nds) eq "ARRAY") {
@@ -1817,76 +2038,304 @@ sub _ic_scalars {
 
       if ($ordered) {
          for (my $i=0; $i<=$#$nds; $i++) {
-            _ic_scalars($self,$$nds[$i],$hashref,[@$mpath,$i],[@$path,$i]);
+            _ic_desc($self,$$nds[$i],$desc,[@$mpath,$i],[@$path,$i],$ul,$delim);
          }
 
       } else {
          for (my $i=0; $i<=$#$nds; $i++) {
-            _ic_scalars($self,$$nds[$i],$hashref,[@$mpath,"_ul_$i"],[@$path,$i]);
+            _ic_desc($self,$$nds[$i],$desc,[@$mpath,"_ul_$i"],[@$path,$i],$ul+1,
+                     $delim);
          }
       }
 
    } elsif (! $self->empty($nds)) {
-      my $p    = $self->path($path);
-      my $mp   = $self->path($mpath);
-      my @p    = $self->path($path);
-      $$hashref{$p}{"val"}   = $nds;
-      $$hashref{$p}{"mpath"} = $mp;
-      $$hashref{$p}{"path"}  = [@p];
+      my $p     = $self->path($path);
+      my $mp    = $self->path($mpath);
+
+      $$desc{$mp} = { "val"   => $nds,
+                      "path"  => $p,
+                      "mpath" => $mp,
+                      "meles" => _ic_mpath2meles($self,$mpath,$delim),
+                      "ul"    => $ul
+                    };
    }
 }
 
-# Check for every path which has the form _ul_I in it.
+# Move all elements from %desc to %ul which have unordered list elements
+# in them.
 #
 sub _ic_ul {
-   my($self,$scalars,$uls) = @_;
-   my $delim = $self->delim();
+   my($desc,$ul) = @_;
 
-   foreach my $path (CORE::keys %$scalars) {
-      my $mpath = $$scalars{$path}{"mpath"};
-      next  unless ($mpath =~ /\Q$delim\E_ul_\d+(\Q$delim\E|$)/);
-      $$uls{$path} = 1;
-   }
-}
-
-# Takes every element in a %scalar hash and creates the %mpath hash.
-#
-sub _ic_mpath {
-   my($scalar,$mpath) = @_;
-
-   foreach my $path (CORE::keys %$scalar) {
-      my $mp = $path;
-      $mp    =~ s/_ul_\d+/\*/g;
-      $$scalar{$path}{"mpath"} = $mp;
-      if (exists $$mpath{$mp}) {
-         push @{ $$mpath{$mp} },$path;
-      } else {
-         $$mpath{$mp} = [ $path ];
+   foreach my $mpath (CORE::keys %$desc) {
+      if ($$desc{$mpath}{"ul"}) {
+         $$ul{$mpath} = $$desc{$mpath};
+         delete $$desc{$mpath};
       }
    }
 }
 
-# Takes a path and returns a list of all keys in the hash $ele which have
-# the exact same form. For this condition to hold true, all path elements
-# have to be exactly the same except for unordered lists.
-
-#      o  While this list contains elements:
-#           Take the first one and match it to (.*)<<(i)>>(.*)
-#           PATH1,ELE,PATH2 = ($1,$2,$3)
-#           Here, PATH1 may contain other unordered element entries, but
-#           PATH2 does not.
+# This moves moves all elements from %ul to %desc which have the given
+# first element in @meles.
 #
-#           Find a list of all of the paths which start with PATH1<<i>>
-#           Create a hash of all PATH2 => VAL
-#           Assign a unique checksum based on the sorted key=>values
-#           Replace PATH1/<<i>> with PATH1/CHECKSUM
+# $mele can be an unordered list element (in which case all elements
+# with unordered list elements are moved) or not (in which case, all
+# elements with the same first $mele are moved).
 #
-#           Recreate the list of all PATHs still containing unordered
-#           list elements
-#         Done
-#      o  Now, check to make sure that every PATH => VAL pair included
-#         in one NDS is in both (identical) or the first (contains)
+sub _ic_ul2desc {
+   my($ul,$desc,$mele,$isul) = @_;
 
+   foreach my $mpath (CORE::keys %$ul) {
+      if ( ($isul    &&  $$ul{$mpath}{"meles"}[0] =~ /^_ul_/)  ||
+           (! $isul  &&  $$ul{$mpath}{"meles"}[0] eq $mele) ) {
+
+         # Move the element to %desc
+
+         $$desc{$mpath} = $$ul{$mpath};
+         delete $$ul{$mpath};
+
+         # Fix @meles accordingly
+
+         my @meles = @{ $$desc{$mpath}{"meles"} };
+         my $m = shift(@meles);
+
+         $$desc{$mpath}{"meles"} = [ @meles ];
+         $$desc{$mpath}{"mele"} = $m;
+      }
+   }
+}
+
+# This goes through a description hash (%desc) and sets the "meles" value
+# for each element.
+#
+sub _ic_mpath2meles {
+   my($self,$mpath,$delim) = @_;
+   my(@mpath) = $self->path($mpath);
+
+   my @meles  = ();
+   my $tmp    = "";
+   foreach my $mele (@mpath) {
+      if ($mele =~ /^_ul_/) {
+         if ($tmp) {
+            push(@meles,$tmp);
+            $tmp = "";
+         }
+         push(@meles,$mele);
+      } else {
+         if ($tmp) {
+            $tmp .= "$delim$mele";
+         } else {
+            $tmp = $mele;
+         }
+      }
+   }
+   if ($tmp) {
+      push(@meles,$tmp);
+   }
+   return [ @meles ];
+}
+
+# This goes through all of the elements in a %desc hash. All of them should
+# have a descriptor "mele" which is an unordered list index in the form
+# _ul_I . Find out how many unique ones there are.
+#
+sub _ic_max_idx {
+   my($desc) = @_;
+
+   my %tmp;
+   foreach my $mpath (CORE::keys %$desc) {
+      my $mele = $$desc{$mpath}{"mele"};
+      $tmp{$mele} = 1;
+   }
+
+   my @tmp = CORE::keys %tmp;
+   return $#tmp;
+}
+
+# This copies all elements from one description hash (%tmpdesc) to a final
+# description hash (%desc). Along the way, it substitutes all leading
+# unordered list indices (_ul_i) with the current permutation index.
+#
+# So if the list of indices (@idx) is (0,2,1) and the current list of
+# unorderd indices is (_ul_0, _ul_1, _ul_2), then every element containing
+# a leading _ul_1 in the mpath will be modified and that element will be
+# replaced by "2".
+#
+sub _ic_permutation {
+   my($tmpdesc,$desc,@idx) = @_;
+
+   # Get a sorted list of all unordered indices:
+   #   (_ul_0, _ul_1, _ul_2)
+
+   my(%tmp);
+   foreach my $mpath (CORE::keys %$tmpdesc) {
+      my $mele    = $$tmpdesc{$mpath}{"mele"};
+      $tmp{$mele} = 1;
+   }
+   my @tmp = sort(CORE::keys %tmp);
+
+   # Create a hash of unordered list indices and their
+   # replacement:
+   #   _ul_0  => 0
+   #   _ul_1  => 2
+   #   _ul_2  => 1
+
+   %tmp = ();
+   while (@tmp) {
+      my($ul)  = shift(@tmp);
+      my($idx) = shift(@idx);
+      $tmp{$ul} = $idx;
+   }
+
+   # Copy the element from %tmpdesc to %desc
+   #    Substitute the unordered list index with the permutation index
+   #    Clear "mele" value
+   #    Decrement "ul" value
+
+   foreach my $mpath (CORE::keys %$tmpdesc) {
+      my $mele  = $$tmpdesc{$mpath}{"mele"};
+      my $idx   = $tmp{$mele};
+      my $newmp = $mpath;
+      $newmp    =~ s/$mele/$idx/;
+
+      $$desc{$newmp}          = dclone($$tmpdesc{$mpath});
+      $$desc{$newmp}{"mpath"} = $newmp;
+      $$desc{$newmp}{"mele"}  = "";
+      $$desc{$newmp}{"ul"}--;
+   }
+}
+
+###############################################################################
+# WHICH
+###############################################################################
+
+sub which {
+   my($self,$nds,@crit) = @_;
+   $nds = _nds($self,$nds);
+
+   if (! @crit) {
+      my %ret;
+      _which_scalar($self,$nds,\%ret,{},[]);
+      return %ret;
+   } else {
+      my(@re,%vals,%ret);
+      foreach my $crit (@crit) {
+         if (ref($crit) eq "Regexp") {
+            push(@re,$crit);
+         } else {
+            $vals{$crit} = 1;
+         }
+      }
+      _which_scalar($self,$nds,\%ret,\%vals,\@re);
+      return %ret;
+   }
+}
+
+# Sets %ret to be a hash of PATH => VAL for every path which
+# passes one of the criteria.
+#
+# If %vals is not empty, a path passes if it's value is any of
+# the keys in %vals.
+#
+# If @re is not empty, a path passes if it matches any of the
+# regular expressions in @re.
+#
+sub _which_scalar {
+   my($self,$nds,$ret,$vals,$re,@path) = @_;
+
+   if (ref($nds) eq "HASH") {
+      foreach my $key (CORE::keys %$nds) {
+         _which_scalar($self,$$nds{$key},$ret,$vals,$re,@path,$key);
+      }
+
+   } elsif (ref($nds) eq "ARRAY") {
+      foreach (my $i = 0; $i <= $#$nds; $i++) {
+         _which_scalar($self,$$nds[$i],$ret,$vals,$re,@path,$i);
+      }
+
+   } else {
+      my $path = $self->path([@path]);
+      my $crit = 0;
+
+      if (CORE::keys %$vals) {
+         $crit = 1;
+         if (exists $$vals{$nds}) {
+            $$ret{$path} = $nds;
+            return;
+         }
+      }
+
+      if (@$re) {
+         $crit = 1;
+         foreach my $re (@$re) {
+            if ($nds =~ $re) {
+               $$ret{$path} = $nds;
+               return;
+            }
+         }
+      }
+
+      return  if ($crit);
+
+      # No criteria passed in
+      $$ret{$path} = $nds   if (defined $nds);
+      return;
+   }
+}
+
+###############################################################################
+# DEBUG ROUTINES
+###############################################################################
+
+# Begin a new debugging session.
+sub _DBG_begin {
+   my($function) = @_;
+   return  unless ($_DBG);
+
+   $_DBG_FH = new IO::File;
+   $_DBG_FH->open(">>$_DBG_OUTPUT");
+   $_DBG_INDENT = 0;
+   $_DBG_POINT  = 0;
+
+   _DBG_line("#"x70);
+   _DBG_line("# $function");
+   _DBG_line("#"x70);
+}
+
+# End a debugging session.
+sub _DBG_end {
+   my($value) = @_;
+   return  unless ($_DBG);
+
+   _DBG_line("# Ending: $value");
+   $_DBG_FH->close();
+}
+
+# Enter a routine.
+sub _DBG_enter {
+   my($routine) = @_;
+   return  unless ($_DBG);
+   $_DBG_POINT++;
+   $_DBG_INDENT += 3;
+
+   _DBG_line("### Entering[$_DBG_POINT]: $routine");
+}
+
+# Leave a routine.
+sub _DBG_leave {
+   my($value) = @_;
+   return  unless ($_DBG);
+   $_DBG_POINT++;
+
+   _DBG_line("### Leaving[$_DBG_POINT]: $value");
+   $_DBG_INDENT -= 3;
+}
+
+# Print a debugging line.
+sub _DBG_line {
+   my($line) = @_;
+   print $_DBG_FH " "x$_DBG_INDENT,$line,"\n";
+}
 
 ###############################################################################
 ###############################################################################

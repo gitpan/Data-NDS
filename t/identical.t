@@ -42,6 +42,21 @@ $nds1 = {
                "b"  => "bar" },
   "ele04" => [ [ qw(l1a l1b l1c) ],
                [ qw(l2a l2b l2c) ] ],
+  "ele05" => [ [ qw(l1a l1b l1c) ],
+               [ qw(l2a l2b l2c) ] ],
+  "ele06" => [ [ qw(l1a l1b l1c) ],
+               [ qw(l2a l2b l2c) ] ],
+  "ele07" => [ [ qw(l1a l1b l1c) ],
+               [ qw(l2a l2b l2c) ] ],
+  "ele08" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 2, "fname" => "Tim", "lname" => "James" },
+               { "id" => 3, "fname" => "Jon", "lname" => "Bills" } ],
+  "ele09" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 2, "fname" => "Tim", "lname" => "James" },
+               { "id" => 3, "fname" => "Jon", "lname" => "Bills" } ],
+  "ele10" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 2, "fname" => "Tim", "lname" => "James" },
+               { "id" => 3, "fname" => "Jon", "lname" => "Bills" } ],
 };
 
 $nds2 = { 
@@ -54,6 +69,20 @@ $nds2 = {
                "b"  => "baz" },
   "ele04" => [ [ qw(l1a l1c l1b) ],
                [ qw(l2a l2c l2b) ] ],
+  "ele05" => [ [ qw(l2a l2b l2c) ],
+               [ qw(l1a l1b l1c) ] ],
+  "ele06" => [ [ qw(l1a l1b l1c) ],
+               [ qw(l2a l2c) ] ],
+  "ele07" => [ [ qw(l1a l1b l1c) ],
+               [ qw(l2a l2e l2c) ] ],
+  "ele08" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 3, "fname" => "Jon", "lname" => "Bills" },
+               { "id" => 2, "fname" => "Tim", "lname" => "James" } ],
+  "ele09" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 3, "fname" => "Jon", "lname" => "Bills" } ],
+  "ele10" => [ { "id" => 1, "fname" => "Sam", "lname" => "Jones" },
+               { "id" => 2,                   "lname" => "James" },
+               { "id" => 3, "fname" => "Jon"                     } ],
 };
 
 $obj->nds("nds1",$nds1,1);
@@ -66,8 +95,20 @@ $tests = "
 
 /ele03 ~ 0 0
 
+/ele04 ~ 1 1
+
+/ele05 ~ 1 1
+
+/ele06 ~ 0 1
+
+/ele07 ~ 0 0
+
+/ele08 ~ 1 1
+
+/ele09 ~ 0 1
+
+/ele10 ~ 0 1
 ";
-# /ele04 ~ 0 0
 
 print "identical/contains...\n";
 test_Func(\&test,$tests,$runtests,$obj);

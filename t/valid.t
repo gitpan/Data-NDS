@@ -54,6 +54,8 @@ $tests = "
 
 /d/d2k ~ 1 d2v
 
+/f/1/2 ~ 0 1 /f
+
 ";
 
 print "valid...\n";

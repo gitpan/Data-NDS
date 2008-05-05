@@ -18,53 +18,32 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
+  my $nds = pop(@test);
   my $obj = pop(@test);
-  return $obj->empty(@test);
+  my %hash = $obj->which($nds,@test);
+  my @ret;
+  foreach my $key (sort keys %hash) {
+    push(@ret,$key,$hash{$key});
+  }
+  return @ret;
 }
 
 $obj = new Data::NDS;
+$nds = { "b" => "foo",
+         "c" => [ "c1", "c2" ],
+         "d" => { "d1k" => "d1v", "d2k" => "d2v" },
+       };
 
-$tests =
-[
-  [
-    [ ],
-    [ 1 ]
-  ],
+$tests = "
 
-  [
-    [ undef ],
-    [ 1 ]
-  ],
+~ /b foo /c/0 c1 /c/1 c2 /d/d1k d1v /d/d2k d2v
 
-  [
-    [ [ "" ] ],
-    [ 0 ]
-  ],
+c2 d1v ~ /c/1 c2 /d/d1k d1v
 
-  [
-    [ [ "", undef ] ],
-    [ 0 ]
-  ],
+";
 
-  [
-    [ [ undef, undef ] ],
-    [ 1 ]
-  ],
-
-  [
-    [ { 1, "", 2, undef } ],
-    [ 0 ]
-  ],
-
-  [
-    [ { 1, undef, 2, undef } ],
-    [ 1 ]
-  ],
-
-];
-
-print "empty...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+print "which...\n";
+test_Func(\&test,$tests,$runtests,$obj,$nds);
 
 1;
 # Local Variables:
