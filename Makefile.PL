@@ -3,7 +3,7 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
 	NAME             => 'Data::NDS',
-	VERSION_FROM     => 'NDS.pm',
+	VERSION	         => '1.02',
 	($] >= 5.005
 	? (ABSTRACT=>'routines to work with a perl nested data structure',
 	   AUTHOR  =>'Sullivan Beck (sbeck@cpan.org)')

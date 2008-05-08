@@ -1390,6 +1390,10 @@ BACKWARDS INCOMPATIBILITIES
 KNOWN PROBLEMS
     None at this point.
 
+LICENSE
+    This script is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
 AUTHOR
     Sullivan Beck (sbeck@cpan.org)
 

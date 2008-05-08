@@ -7,23 +7,19 @@ package Data::NDS;
 # TODO
 ########################################################################
 
-# Add better support for empty values. A scalar or list element CAN
-# be "" or undef. If undef, it is empty. If "", it is valid. Empty
-# elements should be deleted:
-#    a hash key with a value of undef should be deleted
-#    a list element with a value of undef should be deleted if unordered
-#    a list consisting of only undefs should be deleted (and fix parent)
-#    a hash with no keys should be deleted (and fix parent)
-
 # Add validity tests for data
 # see Data::Domain, Data::Validator
 
 # Add subtract (to remove items in one NDS from another)
 # see Data::Validate::XSD
-# treats all lists as ordered... its' simply too complicated
+# treats all lists as ordered... it's simply too complicated
 # otherwise
 
 # Add clean (to remove empty paths)
+#    a hash key with a value of undef should be deleted
+#    a list element with a value of undef should be deleted if unordered
+#    a list consisting of only undefs should be deleted (and fix parent)
+#    a hash with no keys should be deleted (and fix parent)
 
 # Add ability to ignore structural information so that lists can
 # be unordered and non-uniform ???
@@ -38,7 +34,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "1.01";
+$VERSION = "1.02";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;
@@ -141,22 +137,32 @@ sub delim {
    $$self{"delim"} = $delim;
 }
 
-sub path {
-   my($self,$path) = @_;
-   my($delim) = $self->delim();
-   my(@path);
-   if ($path  &&  ref($path)) {
-      @path = @$path;
-   } elsif (! $path  ||
-            $path eq $delim) {
-      @path = ();
-   } else {
-      $path   =~ s/^\Q$delim\E//;
-      @path   = split(/\Q$delim\E/,$path);
-   }
+{
+   my %path = ();
 
-   return @path  if (wantarray);
-   return $delim . join($delim,@path);
+   sub path {
+      my($self,$path) = @_;
+      my $array       = wantarray;
+      my($delim)      = $self->delim();
+
+      if ($array) {
+         return @$path            if (ref($path));
+         return ()                if (! $path);
+         return @{ $path{$path} } if (exists $path{$path});
+
+         my @tmp      = split(/\Q$delim\E/,$path);
+         shift(@tmp)  if (! defined($tmp[0])  ||  $tmp[0] eq "");
+         $path{$path} = [ @tmp ];
+         return @tmp;
+
+      } else {
+         if (! ref($path)) {
+            return $delim         if (! $path);
+            return $path;
+         }
+         return $delim . join($delim,@$path);
+      }
+   }
 }
 
 ###############################################################################

@@ -17,3 +17,7 @@ Version 1.01   2008-05-05
    Added lots of examples to manual
    Added Build.PL and several other things to meet requirements on
       http://cpants.perl.org/
+
+Version 1.02
+   Additional changes to meet requirements on http://cpants.perl.org/
+   Speedups.
