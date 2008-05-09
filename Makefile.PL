@@ -3,12 +3,13 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
 	NAME             => 'Data::NDS',
-	VERSION	         => '1.02',
+	VERSION	         => '1.03',
 	($] >= 5.005
 	? (ABSTRACT=>'routines to work with a perl nested data structure',
 	   AUTHOR  =>'Sullivan Beck (sbeck@cpan.org)')
 	: ()),
 	'dist' => {COMPRESS=>'gzip',SUFFIX=>'gz'},
+        PL_FILES  => {},
 	PREREQ_PM => {
 		'Storable'            => '0',
 		'Algorithm::Permute'  => '0',
