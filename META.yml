@@ -1,6 +1,6 @@
 ---
 name: Data-NDS
-version: 1.03
+version: 1.04
 author:
   - 'Sullivan Beck <sbeck@cpan.org>'
 abstract: routines to work with a perl nested data structure
@@ -17,7 +17,7 @@ build_requires:
 provides:
   Data::NDS:
     file: lib/Data/NDS.pm
-    version: 1.03
+    version: 1.04
 generated_by: Module::Build version 0.2808
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.2.html

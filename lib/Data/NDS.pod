@@ -7,60 +7,7 @@ Data::NDS - routines to work with a perl nested data structure
 =head1 SYNOPSIS
 
   use Data::NDS;
-  $obj     = new Data::NDS;
-
-  $version = $obj->version;
-
-  $obj->warnings($flag);
-
-  $obj->structure($flag);
-
-  $obj->delim();
-  $obj->delim($delim);
-
-  $obj->ruleset($name);
-
-  $flag    = $obj->ruleset_valid($name);
-
-  @path    = $obj->path($path);
-  @path    = $obj->path(\@path);
-  $path    = $obj->path(\@path);
-  $path    = $obj->path($path);
-
-  $err	   = $obj->nds($name,$nds);
-  $err	   = $obj->nds($name,$nds,$new);
-  $nds     = $obj->nds($name);
-  $flag    = $obj->nds($name,"_delete");
-
-  @ele 	   = $obj->keys($nds,$path);
-  @ele 	   = $obj->values($nds,$path);
-
-  $isempty = $obj->empty($nds);
-
-  ($valid,$val,$where) = $obj->valid($nds,$path);
-  $val     = $obj->value($nds,$path);
-
-  $err     = $obj->erase($nds,$path);
-
-  $err     = $obj->set_structure($item,$val [,$path]);
-
-  $type    = $obj->get_structure($path);
-  $val     = $obj->get_structure($path,$info);
-
-  ($err,$val) = $obj->check_structure($nds [,$new]);
-
-  $err 	   = $obj->set_merge($item,$method [,$ruleset]);
-  $err 	   = $obj->set_merge($path,$method [,$ruleset]);
-
-  $method  = $obj->get_merge($path [,$ruleset]);
-
-  $err     = $obj->merge($nds1,$nds2 [,$ruleset] [,$new]);
-  $err     = $obj->merge_path($nds,$val,$path [,$ruleset] [,$new]);
-
-  $flag    = $obj->identical($nds1,$nds2 [,$new] [,$path]);
-  $flag    = $obj->contains ($nds1,$nds2 [,$new] [,$path]);
-
-  %hash    = $obj->which($nds [CRITERIA]);
+  $obj = new Data::NDS;
 
 =head1 DESCRIPTION
 
@@ -666,10 +613,20 @@ $new is passed in and is true.
 The error value is the value of the check_structure method or -1 if a
 named NDS doesn't exist.
 
+If $nds is passed in as a reference, the actual structure (NOT a copy
+of it) is stored. If $nds is passed in as the name of a stored NDS,
+a copy of the structure will be stored under the new name.
+
   $nds = $obj->nds($name);
 
 This retrieves the named NDS from the object. If it does not exist, it
-will return nothing.
+will return nothing. It returns the actual stored NDS, NOT a copy of it,
+so modifying the returned NDS in any way will modify the stored copy.
+
+  $nds = $obj->nds($name,"_copy");
+
+This is similar to the previous function but it will return a copy
+of the named NDS.
 
   $obj->nds($name,"_delete");
 
@@ -698,13 +655,15 @@ The return value of the method is:
 
 =item valid
 
-  ($valid,$val,$where) = $obj->valid($nds,$path);
+  ($valid,$val,$where) = $obj->valid($nds,$path [,$copy]);
 
 This checks the $nds that is passed in (which can be either a structure
 or a named element) to see if $path is valid.
 
 If $path exists in $nds, it returns two values. The first is 1 meaning
-that the path exists. The second is the value at that path.
+that the path exists. The second is the value at that path. The value
+at the path is the actual value, NOT a copy of it (unless $copy is passed
+in, in which case it IS a copy).
 
 If $path does not exist in $nds, it returns three values. The first is 0
 meaning that the path is not valid. The second one is an error code
@@ -766,7 +725,7 @@ Undef is returned in the case of an error.
   $err = $obj->erase($nds,$path);
 
 This will delete the given path from the NDS. It will delete elements from
-lists, clear elements from ordered lists,or delete entries from hashes.
+lists, clear elements from ordered lists, or delete entries from hashes.
 
 The return value of the method is:
 
@@ -837,10 +796,14 @@ any of the following:
   ordered
   uniform
   merge
+  keys
 
 The appropriate value is returned. If information for a specific path
 is not available, default values will be returned. It returns nothing
 if the path has no structural information available.
+
+The keys information is a list of all known keys that can appear in a
+hash. This may only be used to query keys in a non-uniform hash.
 
 =item check_structure
 
@@ -858,6 +821,18 @@ Error codes are:
 
 The value returned in the case of an error is the path where the
 error occurred.
+
+=item check_value
+
+  ($err,$val) = $obj->check_value($path,$val [,$new]);
+
+This will check to see if $val has the correct structure to be
+stored at $path in an NDS. It will traverse through the structure
+of $val, similar to how the check_structure method traverses
+through an entire NDS.
+
+The values of $new, $err, and $val are the same as in the
+check_structure method.
 
 =item set_merge
 
@@ -903,6 +878,9 @@ This will take two NDSes (each of which can be passed in by name or by
 reference) and will recursively merge the second one into the first
 based on the rules of merging.
 
+The second NDS will be copied, so no part of the merged NDS will
+contain actual parts of the seconds NDS.
+
 The name of a ruleset can be passed in. If it is, that set of merge
 rules will be used to do the merging.
 
@@ -930,6 +908,8 @@ structural information is kept.
 
 It will update structural information based on the NDS if $new is
 passed in and is true.
+
+The actual value passed in (not a copy) will be merged in.
 
 The error code is:
 
@@ -980,6 +960,30 @@ any one of them, it passes. Currently, @args may consist of a list of
 values (scalars) or regular expressions (set using the qr// operator).
 If the value at a path is equal to any of the values passed in in
 @args, or matches any of the regular expressions, then it passes.
+
+=item print
+
+   $string = $obj->print($nds,%opts);
+
+This formats an NDS as a string based on a set of options. Known options
+are:
+
+   indent => NUMBER     Specifies the amount of indentation to add
+                        at each level. Indent must be 1 or more.
+                        Default:  3
+   width  => NUMBER     Specifies the width of a printing area. A
+                        value of 0 means to not impose any width
+                        limit. The minimum allowed width (other than
+                        0) is 20.
+                        Default:  79
+   maxlevel => NUMBER   Specifies the maximum level to print. A value of
+                        0 is all levels, but may only be used then a
+                        width of 0 is used. Levels beyond this will
+                        be pruned.
+                        Default:  the number of levels that can be
+                                  displayed given indent and width
+
+The NDS passed in must be a structure, not a named NDS.
 
 =back
 
@@ -1484,6 +1488,13 @@ The "override" ruleset will recursively override all values.
 =item 1.01
 
 The keys and values methods now only return non-empty elements.
+
+=item 1.04
+
+When working with an NDS, sometimes operations were performed on
+the actual structure, sometimes on copies of the structure. It is
+now documented which is which (and some behaviors were changed to
+be more consistent).
 
 =back
 

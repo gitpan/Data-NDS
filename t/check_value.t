@@ -19,30 +19,40 @@ use Data::NDS;
 sub test {
   (@test)=@_;
   my $obj = pop(@test);
-
-  my @out  = $obj->keys(@test);
-  push(@out,"--");
-  push(@out,$obj->erase(@test));
-  push(@out,"--");
-  push(@out,$obj->keys(@test));
-  return @out;
+  return $obj->check_value(@test);
 }
 
 $obj = new Data::NDS;
 
-$nds1= [ "a", "b" ];
-$nds2= [ "a", "b" ];
-$obj->nds("ele1",$nds1,1);
-$obj->nds("ele2",$nds2,1);
+$o = { a => [ 1,2,3 ],
+       b => { bb => 1 },
+     };
+$obj->check_structure($o,1);
 
-$tests = "
-ele1 ~ 0 1 -- 0 --
+$s  = "foo";
+$l  = [ 4,5,6 ];
+$hs = { bb => 2 };
+$hl = { bb => [1] };
 
-ele2 / ~ 0 1 -- 0 --
+$tests = 
+[
+  [ [ "/a", $s ],
+    [ 2, "/a" ] ],
 
-";
+  [ [ "/a", $l ],
+    [ 0, "" ] ],
 
-print "erase (entire list)...\n";
+  [ [ "/b", $s ],
+    [ 2, "/b" ] ],
+
+  [ [ "/b", $hs ],
+    [ 0, "" ] ],
+
+  [ [ "/b", $hl ],
+    [ 2, "/b/bb" ] ],
+];
+
+print "check_value...\n";
 test_Func(\&test,$tests,$runtests,$obj);
 
 1;

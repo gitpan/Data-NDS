@@ -34,7 +34,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "1.03";
+$VERSION = "1.04";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;
@@ -188,9 +188,21 @@ sub nds {
    # $obj->nds($name,"_delete");
    #
 
+   if ($nds eq "_copy") {
+      if (exists $$self{"nds"}{$name}) {
+         return dclone($$self{"nds"}{$name});
+      } else {
+         return undef;
+      }
+   }
+
+   #
+   # $obj->nds($name,"_delete");
+   #
+
    if ($nds eq "_delete") {
       delete $$self{"nds"}{$name}, return 1
-        if (exists $$self{"nds"}{$name});
+       if (exists $$self{"nds"}{$name});
       return 0;
    }
 
@@ -202,7 +214,7 @@ sub nds {
    if (ref($nds)) {
       my($err,$val) = $self->check_structure($nds,$new);
       return ($err)  if ($err);
-      $$self{"nds"}{$name} = dclone($nds);
+      $$self{"nds"}{$name} = $nds;
       return 0;
 
    } elsif (exists $$self{"nds"}{$nds}) {
@@ -215,12 +227,20 @@ sub nds {
 }
 
 sub _nds {
-   my($self,$nds) = @_;
+   my($self,$nds,$copy) = @_;
 
    if (defined $nds  &&  exists $$self{"nds"}{$nds}) {
-      return $$self{"nds"}{$nds};
+      if ($copy) {
+         return dclone($$self{"nds"}{$nds});
+      } else {
+         return $$self{"nds"}{$nds};
+      }
    } else {
-      return $nds;
+      if ($copy  &&  ref($nds)) {
+         return dclone($nds);
+      } else {
+         return $nds;
+      }
    }
 }
 
@@ -323,7 +343,7 @@ sub values {
 # Checks to see if a path is valid in an NDS
 
 sub valid {
-   my($self,$nds,$path) = @_;
+   my($self,$nds,$path,$copy) = @_;
    $nds = _nds($self,$nds);
    my($delim) = $self->delim();
    my @path   = $self->path($path);
@@ -332,7 +352,14 @@ sub valid {
       return (0,-1);
    }
 
-   return _valid($nds,$delim,"",@path);
+   my($valid,$val,$where) = _valid($nds,$delim,"",@path);
+   if ($copy  &&  $valid) {
+      return($valid,dclone($val));
+   } elsif ($valid) {
+      return($valid,$val);
+   } else {
+      return($valid,$val,$where);
+   }
 }
 
 sub value {
@@ -348,7 +375,9 @@ sub _valid {
    # We've traversed as far as @path goes
    #
 
-   return (1,$nds)  if (! @path);
+   if (! @path) {
+      return (1,$nds);
+   }
 
    #
    # Get the next path element.
@@ -419,7 +448,7 @@ sub merge {
       return 1;
    }
 
-   $nds2 = _nds($self,$nds2);
+   $nds2 = _nds($self,$nds2,1);
    if (! defined($nds2)) {
       _warn($self,"[merge] NDS2 undefined: $nds2");
       return 1;
@@ -481,17 +510,13 @@ sub _merge {
 
    #
    # If $nds2 is empty, we'll always return whatever $nds1 is.
-   # If $nds1 is empty or "", we'll always return a copy of whatever $nds2 is.
+   # If $nds1 is empty or "", we'll always return whatever $nds2 is.
    #
 
    return $nds1  if ($self->empty($nds2));
    if ($self->empty($nds1)  ||
        (! ref($nds1)  &&  $nds1 eq "")) {
-      if (ref($nds2)) {
-         return dclone($nds2);
-      } else {
-         return $nds2;
-      }
+      return $nds2;
    }
 
    #
@@ -513,7 +538,7 @@ sub _merge {
       _warn($self,"[merge] replacing initial value\n" .
                   "        path: $path",1)  if ($method eq "replace_warn");
       if (ref($nds2)) {
-         return dclone($nds2);
+         return $nds2;
       }
       return $nds2;
 
@@ -565,11 +590,7 @@ sub _merge_hashes {
       if (! exists $$val1{$key}  ||
           $self->empty($$val1{$key})  ||
           (! ref($$val1{$key})  &&  $$val1{$key} eq "")) {
-         if (ref($$val2{$key})) {
-            $$val1{$key} = dclone($$val2{$key});
-         } else {
-            $$val1{$key} = $$val2{$key};
-         }
+         $$val1{$key} = $$val2{$key};
 
       } else {
          $$val1{$key} =
@@ -588,7 +609,7 @@ sub _merge_lists {
    # Handle append unordered
 
    if ($method eq "append") {
-      push(@$val1,@{ dclone($val2) });
+      push(@$val1,@$val2);
       return $val1;
    }
 
@@ -608,11 +629,7 @@ sub _merge_lists {
 
       } elsif ($self->empty($$val1[$i])  ||
                (! ref($$val1[$i])  &&  $$val1[$i] eq "")) {
-         if (ref($$val2[$i])) {
-            $$val1[$i] = dclone($$val2[$i]);
-         } else {
-            $$val1[$i] = $$val2[$i];
-         }
+         $$val1[$i] = $$val2[$i];
 
       } else {
          $$val1[$i] =
@@ -1139,7 +1156,8 @@ sub _set_merge_path {
       my $err = shift(@tmp);
       my %tmp = map { $_,1 } @tmp;
       if (! exists $tmp{$val}) {
-         _warn($self,"[set_merge_default] Invalid value for default: $item = $val");
+         _warn($self,"[set_merge_default] Invalid value for default: " .
+               "$item = $val");
          return $err;
       }
       $$self{"ruleset"}{$ruleset}{"def"}{$item} = $val;
@@ -1278,6 +1296,22 @@ sub get_structure {
          return $$self{"defstruct"}{"merge_scalar"};
       }
 
+   } elsif ($info eq "keys") {
+      return ""  if ($type ne "hash");
+      return ""  if (exists $$self{"struct"}{$p}{"uniform"}  &&
+                     $$self{"struct"}{$p}{"uniform"});
+      my @keys = ();
+    PP: foreach my $pp (CORE::keys %{ $$self{"struct"} }) {
+         # Look for paths of the form: $p/KEY
+         my @pp = $self->path($pp);
+         next  if ($#pp != $#p + 1);
+         my $key = pop(@pp);
+         my $tmp = $self->path(\@pp);
+         next  if ($tmp ne $p);
+         push(@keys,$key);
+      }
+      return sort @keys;
+
    } else {
       return "";
    }
@@ -1343,7 +1377,7 @@ sub get_merge {
 }
 
 ###############################################################################
-# CHECK_STRUCTURE
+# CHECK_STRUCTURE/CHECK_VALUE
 ###############################################################################
 # This checks the structure of an NDS (and may update the structural
 # information if appropriate).
@@ -1355,6 +1389,12 @@ sub check_structure {
    $new = 0  if (! $new);
 
    _check_structure($self,$nds,$new,());
+}
+
+sub check_value {
+   my($self,$path,$val,$new) = @_;
+   my(@path) = $self->path($path);
+   return _check_structure($self,$val,$new,@path);
 }
 
 sub _check_structure {
@@ -1954,10 +1994,6 @@ sub _ic_compare_ul {
          # Try every combination of the elements in %ul2 setting
          # _ul_I to J (where J is 1..MAX and MAX comes from %ul1)
 
-         # For some reason (a bug in Algorigthm::Permute???) the
-         # recursion here is causing unpredictable behaviors. We'll
-         # get a list of all combinations and store them here to
-         # avoid the problem.
          my $p = new Algorithm::Permute([0..$max1],$max2+1);
 
          while (my(@idx) = $p->next) {
@@ -2288,6 +2324,187 @@ sub _which_scalar {
       return;
    }
 }
+
+###############################################################################
+# PRINT
+###############################################################################
+
+sub print {
+   my($self,$nds,%opts) = @_;
+
+   if (exists $opts{"indent"}) {
+      my $opt = $opts{"indent"};
+      if ($opt !~ /^\d+$/  ||
+          $opt < 1) {
+         _warn($self,"Invalid option: indent: $opt",1);
+         return;
+      }
+   } else {
+      $opts{"indent"} = 3;
+   }
+
+   if (exists $opts{"width"}) {
+      my $opt = $opts{"width"};
+      if ($opt !~ /^\d+$/  ||
+          ($opt > 0  &&  $opt < 20)) {
+         _warn($self,"Invalid option: width: $opt",1);
+         return;
+      }
+   } else {
+      $opts{"width"} = 79;
+   }
+
+   my $maxlevel = ($opts{"width"} == 0 ? 0 : int( ($opts{"width"} - 10)/
+                                                  $opts{"indent"} ) + 1);
+   if (exists $opts{"maxlevel"}) {
+      my $opt = $opts{"maxlevel"};
+      if ($maxlevel != 0  &&  $opt > $maxlevel) {
+         _warn($self,"Maxlevel exceeded: $opt > $maxlevel",1);
+         $opts{"maxlevel"} = $maxlevel;
+      }
+   } else {
+      $opts{"maxlevel"} = $maxlevel;
+   }
+
+   return _print($nds,0,1,%opts);
+}
+
+sub _print {
+   my($nds,$indent,$level,%opts) = @_;
+
+   my $string;
+   my $indentstr  = " "x$indent;
+   my $nextindent = $indent + $opts{"indent"};
+   my $currwidth  = ($opts{"width"} == 0 ? 0 : $opts{"width"} - $indent);
+
+   if (ref($nds) eq "HASH") {
+      # Print
+      #     key  : val      val is a scalar, and it fits
+      #     key  : ...      we're at maxlevel, val is a ref, and ... fits
+      #     key  :          otherwise
+      #        val
+
+      # Find the length of the longest key
+      my @keys = CORE::keys %$nds;
+      @keys    = sort _sortByLength(@keys);
+      my $maxl = length($keys[0]);
+      my $keyl = 0;
+      my $vall = 0;
+
+      # Find the length that we'll allocate for keys (the rest if
+      # for values).
+      if ( $currwidth  &&  ($maxl+1) > $currwidth ) {
+         # keys won't all fit on the line, so truncate them
+         $keyl = $currwidth - 1;
+      } else {
+         $keyl = $maxl;
+         if ($currwidth == 0) {
+            $vall = -1;
+         } else {
+            $vall = $currwidth - ($keyl + 2);  # key:_ (include a space)
+            $vall = 0  if ($vall < 0);
+         }
+      }
+
+      # Print each key
+      foreach my $key (sort @keys) {
+         my $val = $$nds{$key};
+         $val    = "undef"  if (! defined $val);
+         $val    = "''"     if (! ref($val)  &&  $val eq "");
+         my $k   = $key;
+         if (length($k) > $keyl) {
+            $k   = substr($k,0,$keyl);
+         } elsif (length($k) < $keyl) {
+            $k   = $k . " "x($keyl - length($k));
+         }
+         $string .= "$indentstr$k" . ":";
+
+         if (! ref($val)  &&  ($vall == -1  ||  length($val) <= $vall)) {
+            $string .= " $val\n";
+
+         } elsif (ref($val)  &&
+                  $opts{"maxlevel"} == $level  &&
+                  ($vall == -1  ||  $vall > 3)) {
+            $string .= " ...\n";
+
+         } else {
+            $string .= "\n";
+            $string .= _print($val,$nextindent,$level+1,%opts);
+         }
+      }
+
+   } elsif (ref($nds) eq "ARRAY") {
+      # Print each element as:
+      #     0  = val      val is a scalar, and it fits
+      #     0  = ...      we're at maxlevel, val is a ref, and ... fits
+      #     0  =          otherwise
+      #        val
+
+      # Find the length of the longest index
+      my $maxl = length($#$nds + 1);
+      my $keyl = 0;
+      my $vall = 0;
+
+      # Find the length allocated for indices and the rest for values.
+      if ( ($maxl + 1) > $currwidth ) {
+         # keys won't all fit on the line, so truncate them
+         $keyl = $currwidth - 1;
+      } else {
+         $keyl = $maxl;
+         if ($currwidth == 0) {
+            $vall = -1;
+         } else {
+            $vall = $currwidth - ($keyl + 2);  # key:_ (include a space)
+            $vall = 0  if ($vall < 0);
+         }
+      }
+
+      # Print each index
+      for (my $key=0; $key <= $#$nds; $key++) {
+         my $val = $$nds[$key];
+         $val    = "undef"  if (! defined $val);
+         $val    = "''"     if (! ref($val)  &&  $val eq "");
+         my $k   = $key;
+         if (length($k) > $keyl) {
+            $k   = substr($k,0,$keyl);
+         } elsif (length($k) < $keyl) {
+            $k   = " "x($keyl - length($k)) . $k;
+         }
+         $string .= "$indentstr$k" . "=";
+
+         if (! ref($val)  &&  ($vall == -1  ||  length($val) <= $vall)) {
+            $string .= " $val\n";
+
+         } elsif (ref($val)  &&
+                  $opts{"maxlevel"} == $level  &&
+                  ($vall == -1  ||  $vall > 3)) {
+            $string .= " ...\n";
+
+         } else {
+            $string .= "\n";
+            $string .= _print($val,$nextindent,$level+1,%opts);
+         }
+      }
+
+   } else {
+      $nds    = "undef"  if (! defined $nds);
+      $nds    = "''"     if (! ref($nds)  &&  $nds eq "");
+
+      if (length($nds) > $currwidth) {
+         $nds = substr($nds,0,$currwidth-3) . "...";
+      }
+      $string = "$indentstr$nds\n";
+   }
+
+   return $string;
+}
+
+no strict "vars";
+# This sorts from longest to shortest element
+sub _sortByLength {
+  return (length $b <=> length $a);
+}
+use strict "vars";
 
 ###############################################################################
 # DEBUG ROUTINES

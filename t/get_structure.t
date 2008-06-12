@@ -101,6 +101,8 @@ $tests = "
 
 /hn/* ~
 
+/hn keys ~ a b
+
 /hu/a ~ scalar
 
 /hu/* ~ scalar

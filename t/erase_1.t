@@ -30,10 +30,12 @@ sub test {
 
 $obj = new Data::NDS;
 
-$nds = { "a" => 1,
+$nds1= { "a" => 1,
          "b" => 2 };
-$obj->nds("ele1",$nds,1);
-$obj->nds("ele2",$nds,1);
+$nds2= { "a" => 1,
+         "b" => 2 };
+$obj->nds("ele1",$nds1,1);
+$obj->nds("ele2",$nds2,1);
 
 $tests = "
 ele1 ~ a b -- 0 --

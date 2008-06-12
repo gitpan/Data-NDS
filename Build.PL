@@ -3,15 +3,15 @@ use Module::Build;
 
 my $build = Module::Build->new(
 	license            => 'perl',
-	dist_version       => '1.03',
+	dist_version       => '1.04',
 	dist_author        => 'Sullivan Beck <sbeck@cpan.org>',
 	module_name        => 'Data::NDS',
 	dist_abstract      => 'routines to work with a perl nested data structure',
 	requires           => {
 		'perl'                => '5.6.0',
-		'Storable'            => '0',
 		'Algorithm::Permute'  => '0',
 		'IO::File'            => '0',
+		'Storable'            => '0',
 	},
 	build_requires     => {
 		'Test::More'          => '0',

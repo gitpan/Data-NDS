@@ -8,6 +8,7 @@ Makefile.PL
 MANIFEST			This list of files
 README
 t/check_structure.t
+t/check_value.t
 t/delim.t
 t/empty.t
 t/erase_1.t
@@ -20,7 +21,8 @@ t/keys.t
 t/merge.t
 t/merge_path_1.t
 t/merge_path_2.t
-t/nds.t
+t/nds_1.t
+t/nds_2.t
 t/path_1.t
 t/path_2.t
 t/pod.t

@@ -18,31 +18,36 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
+  my ($op,$ele,$path,$obj) = @test;
 
-  my @out  = $obj->keys(@test);
-  push(@out,"--");
-  push(@out,$obj->erase(@test));
-  push(@out,"--");
-  push(@out,$obj->keys(@test));
-  return @out;
+  if ($op eq "copy") {
+     $nds = $obj->nds($ele,"_copy");
+  } else {
+     $nds = $obj->nds($ele);
+  }
+  @ret = ();
+  push(@ret,$obj->keys($nds,"/"),"--");
+  $obj->erase($nds,$path);
+  push(@ret,$obj->keys($nds,"/"),"--");
+  $nds = $obj->nds($ele);
+  push(@ret,$obj->keys($nds,"/"));
+  return @ret;
 }
 
 $obj = new Data::NDS;
 
-$nds1= [ "a", "b" ];
-$nds2= [ "a", "b" ];
-$obj->nds("ele1",$nds1,1);
-$obj->nds("ele2",$nds2,1);
+$nds = { "a" => [ "a1", "a2" ],
+         "b" => [ "b1", "b2" ] };
+$obj->nds("ele1",$nds,1);
 
 $tests = "
-ele1 ~ 0 1 -- 0 --
+copy ele1 /a ~ a b -- b -- a b
 
-ele2 / ~ 0 1 -- 0 --
+real ele1 /a ~ a b -- b -- b
 
 ";
 
-print "erase (entire list)...\n";
+print "nds (copy)...\n";
 test_Func(\&test,$tests,$runtests,$obj);
 
 1;

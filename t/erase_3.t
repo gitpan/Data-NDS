@@ -25,6 +25,7 @@ sub test {
   push(@out,$obj->erase($ele,$delpath));
   push(@out,"--");
   push(@out,$obj->keys($ele,$keyspath));
+  push(@out,"--");
   push(@out,$obj->values($ele,$keyspath))  if ($vals);
   return @out;
 }
@@ -47,22 +48,22 @@ $tests =
 [
   [
     [ qw(ele /a / 0) ],
-    [ qw(a b c d -- 0 -- b c d) ]
+    [ qw(a b c d -- 0 -- b c d -- ) ]
   ],
 
   [
     [ qw(ele /b/x /b 1) ],
-    [ qw(x y -- 0 -- y 22) ]
+    [ qw(x y -- 0 -- y -- 22) ]
   ],
 
   [
     [ qw(ele /c/1 /c 1) ],
-    [ qw(0 1 2 3 -- 0 -- 0 1 2 alpha gamma delta) ]
+    [ qw(0 1 2 3 -- 0 -- 0 1 2 -- alpha gamma delta) ]
   ],
 
   [
     [ qw(ele /d/1 /d 1) ],
-    [ qw(0 1 2 3 -- 0 -- 0 2 3 alpha gamma delta) ]
+    [ qw(0 1 2 3 -- 0 -- 0 2 3 -- alpha gamma delta) ]
   ],
 
 ];

@@ -26,5 +26,11 @@ Version 1.03  2008-05-09
    Final changes to meet requirements on http://cpants.perl.org/
    Bug fix so it won't fail with "Too early to specify a build action"
 
-Version 1.04
+Version 1.04  2008-06-12
+   Added check_value method
+   Added print method
+   Added "keys" to get_structure functionality
+   Explicitly defined each method as working with the actual structure,
+     or with a copy of the structure.
 
+Version 1.05
