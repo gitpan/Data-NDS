@@ -33,4 +33,7 @@ Version 1.04  2008-06-12
    Explicitly defined each method as working with the actual structure,
      or with a copy of the structure.
 
-Version 1.05
+Version 1.05  2008-06-19
+   Fixed a bug in merging
+
+Version 1.06

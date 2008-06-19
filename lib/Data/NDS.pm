@@ -34,7 +34,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "1.04";
+$VERSION = "1.05";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;
@@ -1599,7 +1599,7 @@ sub _merge_path_nds {
 
    # Hard case: create new structure
 
-   my $type = $self->structure([@$pathref,$ele]);
+   my $type = $self->get_structure([@$pathref,$ele]);
    my $new;
    if ($type eq "hash") {
       $new = {};
