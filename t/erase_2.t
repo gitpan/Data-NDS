@@ -18,12 +18,11 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
 
   my @out  = $obj->keys(@test);
   push(@out,"--");
-  push(@out,$obj->erase(@test));
-  push(@out,"--");
+  $obj->erase(@test);
+  push(@out,$obj->err());
   push(@out,$obj->keys(@test));
   return @out;
 }
@@ -36,14 +35,14 @@ $obj->nds("ele1",$nds1,1);
 $obj->nds("ele2",$nds2,1);
 
 $tests = "
-ele1 ~ 0 1 -- 0 --
+ele1 ~ 0 1 -- _blank_
 
-ele2 / ~ 0 1 -- 0 --
+ele2 / ~ 0 1 -- _blank_
 
 ";
 
 print "erase (entire list)...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

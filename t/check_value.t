@@ -18,8 +18,8 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
-  return $obj->check_value(@test);
+  $obj->check_value(@test);
+  return $obj->err();
 }
 
 $obj = new Data::NDS;
@@ -37,23 +37,23 @@ $hl = { bb => [1] };
 $tests = 
 [
   [ [ "/a", $s ],
-    [ 2, "/a" ] ],
+    [ "ndschk01" ] ],
 
   [ [ "/a", $l ],
-    [ 0, "" ] ],
+    [ "_blank_" ] ],
 
   [ [ "/b", $s ],
-    [ 2, "/b" ] ],
+    [ "ndschk01" ] ],
 
   [ [ "/b", $hs ],
-    [ 0, "" ] ],
+    [ "_blank_" ] ],
 
   [ [ "/b", $hl ],
-    [ 2, "/b/bb" ] ],
+    [ "ndschk01" ] ],
 ];
 
 print "check_value...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

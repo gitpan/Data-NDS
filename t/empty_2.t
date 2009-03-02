@@ -18,32 +18,52 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-
-  my @out  = $obj->keys(@test);
-  push(@out,"--");
-  $obj->erase(@test);
-  push(@out,$obj->err());
-  push(@out,$obj->keys(@test));
-  return @out;
+  return $obj->empty(@test);
 }
 
 $obj = new Data::NDS;
+$obj->blank(1);
 
-$nds1= { "a" => 1,
-         "b" => 2 };
-$nds2= { "a" => 1,
-         "b" => 2 };
-$obj->nds("ele1",$nds1,1);
-$obj->nds("ele2",$nds2,1);
+$tests =
+[
+  [
+    [ ],
+    [ 1 ]
+  ],
 
-$tests = "
-ele1 ~ a b -- _blank_
+  [
+    [ undef ],
+    [ 1 ]
+  ],
 
-ele2 / ~ a b -- _blank_
+  [
+    [ [ "" ] ],
+    [ 0 ]
+  ],
 
-";
+  [
+    [ [ "", undef ] ],
+    [ 0 ]
+  ],
 
-print "erase (entire hash)...\n";
+  [
+    [ [ undef, undef ] ],
+    [ 1 ]
+  ],
+
+  [
+    [ { 1, "", 2, undef } ],
+    [ 0 ]
+  ],
+
+  [
+    [ { 1, undef, 2, undef } ],
+    [ 1 ]
+  ],
+
+];
+
+print "empty (blank=1)...\n";
 test_Func(\&test,$tests,$runtests);
 
 1;

@@ -18,7 +18,7 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my ($op,$ele,$path,$obj) = @test;
+  my ($op,$ele,$path) = @test;
 
   if ($op eq "copy") {
      $nds = $obj->nds($ele,"_copy");
@@ -48,7 +48,7 @@ real ele1 /a ~ a b -- b -- b
 ";
 
 print "nds (copy)...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

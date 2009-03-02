@@ -18,8 +18,9 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
-  return $obj->get_structure(@test);
+  @val = $obj->get_structure(@test);
+  $err = $obj->err();
+  return (@val,$err);
 }
 
 $obj = new Data::NDS;
@@ -31,15 +32,15 @@ $$obj{"struct"} = { "/"    => { "type"    => "hash",
                     "/hu"  => { "type"    => "hash",
                                 "uniform" => 1,
                               },
-                    "/auu" => { "type"    => "array",
+                    "/auu" => { "type"    => "list",
                                 "ordered" => 0,
                                 "uniform" => 1,
                               },
-                    "/aou" => { "type"    => "array",
+                    "/aou" => { "type"    => "list",
                                 "ordered" => 1,
                                 "uniform" => 1,
                               },
-                    "/aon" => { "type"    => "array",
+                    "/aon" => { "type"    => "list",
                                 "ordered" => 1,
                                 "uniform" => 0,
                               },
@@ -56,7 +57,7 @@ $$obj{"struct"} = { "/"    => { "type"    => "hash",
                     "/hu/*"  => { "type"    => "scalar" },
 
                     "/h"     => { "type"    => "hash" },
-                    "/a"     => { "type"    => "array" },
+                    "/a"     => { "type"    => "list" },
 
                     "/h2"     => { "type"    => "hash",
                                    "uniform" => 1 },
@@ -65,74 +66,89 @@ $$obj{"struct"} = { "/"    => { "type"    => "hash",
                     "/h2/*/*" => { "type"    => "hash",
                                    "uniform" => 1 },
 
+                    "/h3"     => { },
                   };
 
 $tests = "
 
-/z ~
+/z ~ _blank_ ndschk04
 
-/z type ~
+/z type ~ _blank_ ndschk04
 
-/hn type ~ hash
+/z valid ~ 0 _blank_
 
-/hn ~ hash
+/hn type ~ hash _blank_
 
-/auu/1 ~ scalar
+/hn ~ hash _blank_
 
-/auu/* ~ scalar
+/hn valid ~ 1 _blank_
 
-/aou/1 ~ other
+/h3 ~ _blank_ ndschk05
 
-/aou/* ~ other
+/auu/1 ~ scalar _blank_
 
-/aon/0 ~ scalar
+/auu/* ~ scalar _blank_
 
-/aon/1 ~ other
+/aou/1 ~ other _blank_
 
-/aon/2 ~
+/aou/* ~ other _blank_
 
-/aon/* ~
+/aon/0 ~ scalar _blank_
 
-/hn/a ~ scalar
+/aon/1 ~ other _blank_
 
-/hn/b ~ other
+/aon/2 ~ _blank_ ndschk04
 
-/hn/c ~
+/aon/* ~ _blank_ ndschk04
 
-/hn/* ~
+/hn/a ~ scalar _blank_
 
-/hn keys ~ a b
+/hn/b ~ other _blank_
 
-/hu/a ~ scalar
+/hn/c ~ _blank_ ndschk04
 
-/hu/* ~ scalar
+/hn/* ~ _blank_ ndschk04
 
-/auu ordered ~ 0
+/hn keys ~ a b _blank_
 
-/aon ordered ~ 1
+/hu/a ~ scalar _blank_
 
-/auu uniform ~ 1
+/hu/* ~ scalar _blank_
 
-/aon uniform ~ 0
+/auu ordered ~ 0 _blank_
 
-/hn ordered ~
+/aon ordered ~ 1 _blank_
 
-/hn uniform ~ 0
+/auu uniform ~ 1 _blank_
 
-/hu uniform ~ 1
+/aon uniform ~ 0 _blank_
 
-/a uniform ~ 1
+/hn ordered ~ _blank_ ndschk06
 
-/a ordered ~ 0
+/hn uniform ~ 0 _blank_
 
-/h2/*/foo type ~ hash
+/hu uniform ~ 1 _blank_
 
-/h2/a/foo type ~ hash
+/a uniform ~ 1 _blank_
+
+/a ordered ~ 0 _blank_
+
+/h2/*/foo type ~ hash _blank_
+
+/h2/a/foo type ~ hash _blank_
+
+/hn/a uniform ~ _blank_ ndschk07
+
+/hn/a keys ~ _blank_ ndschk08
+
+/h2 keys ~ _blank_ ndschk09
+
+/h2 foo ~ _blank_ ndschk99
 
 ";
 
 print "get_structure...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

@@ -6,8 +6,14 @@ SYNOPSIS
       $obj = new Data::NDS;
 
 DESCRIPTION
-    This is a module for working with a perl nested data structure (NDS). A
-    data structure may consist of any number of nested perl data types
+    This module contains methods for working with a perl nested data
+    structure (NDS). Before using this module, it is assumed that the
+    programmer is completely familiar with perl data structures. If this is
+    not the case, this module will be of very limited use. Some suggested
+    reading to become familiar with perl data structures is included below
+    in the SEE ALSO section.
+
+    A data structure may consist of any number of nested perl data types
     including:
 
        lists
@@ -37,50 +43,141 @@ ACCESSING AN NDS
     Typically, when accessing a nested data structure, you might use
     something like:
 
-      $nds{foo}[5]{bar}
+      $nds{foo}[2]{bar}
 
-    Although it is very direct, this necessitates putting a great deal of
-    information about the structure directly in the program. It also relies
-    on the fact that the structure is correctly defined, and all parts are
-    present. If there's any possiblitity that this is not the case, you have
-    to recurse through the structure to determine this or face some
-    unexpected side effects. For example, referencing $nds{foo}[5]{bar} will
-    create a lot of structure if it didn't already exist.
+    Although this is very direct, there are some distinct problems with
+    this.
 
-    This module will replace access to the value (or substructure) stored
-    somewhere in an NDS with a call to a method which will automatically
-    check that the structure is correct. It can be used to access, set, or
-    delete parts of an NDS. The above example could be replaced with:
+    Structural information must be built into the script
+        Accessing a nested data structure directly means that the structure
+        of the object is hard coded into the script. Although this is often
+        a useful requirement, it makes changing the structure later on quite
+        difficult.
 
-      $obj->val($nds,"/foo/5/bar");
+        If the structural information can be "hidden" from the program, it
+        makes changing the structure at a later date easier.
 
-    Here, the string "/foo/5/bar"is called a path. It is a series of indices
+    Structure creation side effects
+        Often, you may want to access a structure which doesn't entirely
+        exist. To do so, you either have to recurse into the structure, or
+        you end up creating parts of the structure. For example, if you have
+        the following two lines:
+
+          %nds = ();
+          if (exists $nds{foo}[2]{bar}) { ... }
+
+        the %nds structure will now be:
+
+          %nds = (foo -> [ undef, undef, {} ] )
+
+        so a lot of structure was created that didn't exist previously.
+
+    Error handling
+        If there is a possibility that the reference is not correctly (or
+        completely) defined, and if you need error handling to handle this
+        case, extra code has to be written to recurse through the structure,
+        verifying the data as you go.
+
+    Repetitiveness
+        Many tasks, including error checking, recursing through a structure,
+        validity checking, etc., are very repetitive. They are necessary any
+        time you write a robust script that handles nested data structures.
+
+    This module will simplify the handling of an NDS. It can be used to
+    access the value (or substructure) stored somewhere in an NDS with a
+    call to a method which will automatically check that the structure is
+    correct. It can also be used to set, delete, check, or merge parts of an
+    NDS, along with other useful operations. For example, instead of
+    accessing a data structure directly as:
+
+      $nds{foo}[2]{bar}
+
+    it could be accessed as:
+
+      $obj->value($nds,"/foo/2/bar");
+
+    Here, the string "/foo/2/bar"is called a path. It is a series of indices
     separated by a delimiter (which defaults to "/", but which can be set to
-    other values using the delim method described below). The indices of
-    describe how to traverse through an NDS.
+    other values using the delim method described below). The indices of the
+    path describe how to traverse through an NDS.
 
 NDS STRUCTURE
-    An NDS can have a great deal of structural information associated with
-    it. The data stored at every path in a data structure is of a certain
-    type, and the some types of structural information imply or prohibit
-    other structural characteristics.
+    By default, every Data::NDS object will have a structural description
+    associated with it. This can be explicitly turned off (using the
+    no_structure method below), but doing so will disable much of the
+    functionality of this module.
 
-    When specifying structural information for a path, some elements in the
-    path may be given as a wildcard or as a specific value.
+    By default, this module will determine the structural information by
+    examining the structure of an NDS itself, which means that the
+    programmer does not have to do anything to gain this functionality.
+    Alternately, the module can be used to explicitly specify the structure
+    which applies to the NDS. In this case, the data structure is required
+    to match that description. This automatically does the appropriate error
+    checking necessary to ensure that the structure is correct.
+
+    The data stored at every path in a data structure is of a certain type
+    and has certain structural characteristics. Some structural
+    characteristics imply or prohibit other structural characteristics.
+
+    The primary structural characteristic is the type of data stored at a
+    given path. As mentioned above, this module recognizes 4 types of data:
+
+       lists
+       hashes
+       scalars
+       other (everything else)
+
+    The two other structural characteristics that are used by this module
+    are whether elements are uniform or not, and whether elements are
+    ordered or not.
+
+    Uniform/non-uniform
+        The uniform/non-uniform characteristic applies to lists and hashes.
+
+        A uniform list has elements which are all the same structure. It is
+        not required that all elements have every piece of the structure,
+        but two uniform elements cannot have a different structure at any
+        level. Similarily, a uniform hash has any number of keys, but the
+        value for every key is the same structure.
+
+        A non-uniform list or hash has elements which do not have the same
+        structure.
+
+    Ordered/unordered
+        The ordered/unordered characteristic only applies to lists.
+
+        An ordered list is one in which the position in the list has
+        meaning: i.e. the 1st and 2nd elements in the list are not
+        interchangeable. An example might be an list of addresses where the
+        first address is a physical address and the second address is a
+        billing address.
+
+        An unordered lists is a list in which the order and placement of the
+        elements is not important. An example might be a list of clients.
+        There is no inherent meaning to being the first or second client in
+        the list.
+
+        By implication, because two elements in an unordered list are
+        interchangeable, they must be uniform.
+
+    When specifying structural characteristics for list and hash elements,
+    the path used depends on whether they are uniform or non-uniform. When
+    referring to any element that is in a uniform list or hash, a wildcard
+    character is used. For non-uniform lists and hashes, specific elements
+    are used in the paths.
 
     For example, in a data structure which consists of a hash containing a
-    foo key, and that key contains a list of elements, you might specifify
-    structural information for specific paths:
+    foo key, and that key contains a non-uniform list of elements, you might
+    specifify structural information for specific paths:
 
       /foo/0
       /foo/1
 
-    or for all elements using a wildcard:
+    On the other hand, if the foo key contains a uniform list of elements,
+    you would specify structural information for ALL elements using the
+    path:
 
       /foo/*
-
-    In the second case, structural information is set for ALL elements in
-    the list.
 
     It is not allowed to have structural information simultaneously for both
     types of paths. For example, there will never be structural information
@@ -96,49 +193,94 @@ NDS STRUCTURE
 
     since there is no requirement that /foo and /bar are uniform.
 
-    Most paths in an NDS can have the following pieces of information:
+DETERMINING AND SETTING STRUCTURAL INFORMATION
+    When working with an NDS, structural information can be determined from
+    the NDS, or it can be explicitly set in the program in which case
+    additional validity checking can be done on the NDS.
 
-    type
-        This refers to the what type of data is storead at the path. Known
-        types are scalar, list, hash, and other (which encompasses all other
-        types of perl data types).
+    Structural information may be given as global defaults (i.e. it applies
+    to all paths), or on a path-specific basis. Structural information given
+    for a specific path applies only to that exact path. It does not apply
+    to structures lower OR higher an NDS.
 
-    uniform or non-uniform lists or hashes
-        Hashes and lists can be either uniform or non-uniform. A uniform
-        list has elements which are all the same structure. It is not
-        required that all elements have every piece of the structure, but
-        two elements cannot have a different structure at any level.
+    The following structural information may be determined or set:
 
-        When specifying structural information for uniform list or hashes,
-        the wildcard will always be used. When specifying structural
-        information for non-uniform lists or hashes, paths will always
-        consist of specific elements.
+    ordered
+        By default, all lists are treated as unordered, but that can be
+        overridden, either on the global level, or path specific level, with
+        this.
 
-    ordered or unordered lists
-        Lists can be ordered or unordered. An ordered list is one in which
-        the position in the list has meaning. For example, the 1st and 2nd
-        elements in the list are not interchangeable.
+        If this is set to 1, lists will default to ordered (in the global
+        case), or the list at a specific path is explicitly set to ordered.
 
-        Unordered lists are those in which the order and placement of the
-        elements is not important. Because they are interchangeable, all
-        unordered lists are uniform.
+        If this is set to 0, the list(s) will be unordered.
+
+    uniform_hash
+    uniform_ol
+        These pieces of information apply only on a global level.
+
+        By default, hashes are not uniform. By setting this uniform_hash to
+        1, they will default to uniform.
+
+        By default, all ordered lists are uniform. By setting this
+        descriptor to 0, they will be treated as non-uniform.
+
+        Note that there is no uniform_ul descriptor because ALL unordered
+        lists are treated as uniform since there is no consistent way for
+        structural information to apply to an unordered list which does not
+        have uniform elements.
+
+    uniform
+        This piece of information applies only to a specific path.
+
+        This can apply either to an ordered list or a hash. It is invalid
+        for other data types. It sets the element at the given path to be
+        explicitly uniform or not uniform.
+
+        With respect to ordered lists, there are two caveats.
+
+        Caveat 1:
+
+        Hashes underneath the list element are uniform if the same key has
+        the same structure. It is not required that different keys have the
+        same structure.
+
+        For example, if the path "/a" refers to a uniform ordered list, and
+        structures at "/a/*" are hashes, then it is required that the
+        structure stored at "/a/0/key1" be the same as "/a/1/key1", but the
+        structure stored at "/a/0/key2" can be different.
+
+        Caveat 2:
+
+        Ordered lists underneath the list element are uniform if the
+        elements at the same position have the same structure.
+
+        For example, if the path "/a" refers to a uniform ordered list, and
+        structures at "/a/*" are ordered lists, then it is required that the
+        structure stored at "/a/0/0" be the same as "/a/1/0", but "/a/0/1"
+        may be different.
 
 MERGING NDSes
-    One of the more complex tasks of this module is the ability to take two
-    NDSes and merge them together recursively. At every level of the merge,
-    the data is combined based on the merge method for that path and that
-    type of data.
+    One of the more fundamental tasks of this module is the ability to take
+    two NDSes and merge them together recursively. In it's simplest form,
+    this means that you set the value for a path in an NDS to some structure
+    which is structurally valid for that path. This module goes well beyond
+    that in capability though. Not only can you outright replace (or set)
+    the value at a path, but you can also recursively merge two structures
+    together. At every level of the merge, the data is combined based on the
+    merge method for that path and that type of data.
 
     There are several different methods that can be used for merging NDSes.
 
     Merging hashes
-        Merging hashes is the easiest. Allowed methods are merge, keep,
-        keep_warn, replace, replace_warn, or error.
+        Merging hashes is conceptually the easiest. Allowed methods are
+        merge, keep, keep_warn, replace, replace_warn, or error.
 
         Merging the two hashes:
 
           %nds1 = ( a  => NDS1,
-                    b  => NDS2 )
+                    b  => NDS2,
+                    c  => undef )
 
           %nds2 = ( b  => NDS3,
                     c  => NDS4 )
@@ -149,13 +291,15 @@ MERGING NDSes
                     b => ???
                     c => NDS4 )
 
-        The "a" and "c" keys are the easiest. Since they are only defined in
-        one of the two initial hashes, their value is the value they were
-        defined with, and it is not necessary to recurse deeper into those
-        values.
+        The "a" key is trivial. It is defined in %nds1, but is totally
+        missing in %nds2, so the value from %nds1 is used.
 
-        The "b" key value depends on the merge method. If the method is
-        keep, the first value is used, so
+        The "c" key is also trivial. It is defined in %nds1, but has no
+        value, so the value from %nds2 is used.
+
+        The "b" key value depends on the merge method.
+
+        If the method is keep, the first value is used, so
 
           b => NDS2
 
@@ -167,8 +311,11 @@ MERGING NDSes
         In both of these cases, it is not necessary to recurse into the
         structure.
 
-        If the method is merge, the resulting value is obtained by merging
-        NDS2 and NDS3.
+        If the method is merge, the resulting value is obtained by
+        recursively merging NDS2 and NDS3. If NDS2 and NDS3 are scalars (or
+        some other type of data other than lists or hashes), the rules for
+        choosing the value to be stored in the "b" key are covered below in
+        the "Merging scalars (or other)" section.
 
         If the method is error, an error will occur if the key is defined in
         both hashes, and the program will exit.
@@ -187,9 +334,9 @@ MERGING NDSes
 
         Merging the two lists:
 
-          @list1 = ( NDS1a NDS1b ... )
+          @list1 = ( NDS1a NDS1b undef NDS1d )
 
-          @list2 = ( NDS2a NDS2b ... )
+          @list2 = ( NDS2a NDS2b NDS2c )
 
         will give the following results depending on the merge method.
 
@@ -207,10 +354,17 @@ MERGING NDSes
 
         With the merge method, the resulting list will be
 
-          @list = ( NDS1 NDS2 ... )
+          @list = ( NDS1 NDS2 NDS2c NDS1d )
 
-        where NDS1 is a merger of NDS1a and NDS1b, NDS2 is a merger of NDS2a
-        and NDS2b, etc.
+        As with hashes, the 3rd element and 4th elements in the merged list
+        are trivial. The 3rd element is not defined in @list1, so the
+        elemenet from @list2 is used. Similar for the 4th element.
+
+        NDS1 is a recursive merger of NDS1a and NDS1b and NDS2 is a
+        recursive merger of NDS2a and NDS2b. If NDS2 and NDS3 are scalars
+        (or some other type of data other than lists or hashes), the rules
+        for choosing the value to be stored in the "b" key are covered below
+        in the "Merging scalars (or other)" section.
 
         If the method is error, an error will occur if both lists have
         elements, and the program will exit.
@@ -222,10 +376,6 @@ MERGING NDSes
         The append method is only available with unordered lists. The merge
         method is only available with ordered lists.
 
-        When merging two lists, if a value for an element in the first list
-        is empty, or an empty string (""), it is replaced by the value in
-        the second list.
-
     Merging scalars (or other)
         When data of type scalar or other are merged, allowed methods of
         merging are keep, keep_warn, replace, replace_warn, and error.
@@ -233,149 +383,96 @@ MERGING NDSes
         Scalars or other types are merged when the parent structures are
         merged recursively, and they include scalars at some level.
 
-        For example, given the two hashes:
+        For example, given the two lists:
 
-          %nds1 = ( a  => 1 )
+          @list1 = ( a, undef, '', d )
 
-          %nds2 = ( a  => 2 )
+          @list2 = ( 1, 2,     3)
 
-        which are merged using the "merge" method. The "a" key exists in
-        both, so the values (1 and 2) are merged. Since they are scalars,
-        they will be merged using one of the scalar merge methods listed
-        above.
+        which are merged using the "merge" method, the list is recursed
+        into, so each individual sets of scalars are merged using the method
+        which applies at that level of the structure.
 
-        With the keep and replace methods, the first or second value are
-        returned respectively. With the error method, an error is triggered
-        if both are defined and the program will exit. With the keep_warn
-        and replace_warn methods, a warning will be triggered.
+        With the keep method, the resulting scalar is the first non-empty
+        value of the two scalars. With the replace method, the resulting
+        scalar is the last non-empty value of the two.
 
-STRUCTURAL INFORMATION
-    When handling a data structure, structural information can be kept which
-    will allow you to test a data structure to see if it's valid and how it
-    should be merged with another NDS. Structural information is optional,
-    and reasonable defaults exist.
+        The keep_warn and replace_warn methods are identical but will
+        trigger a warning if two non-empty values are encountered.
 
-    Structural information may be given as global defaults (i.e. it applies
-    to all paths), or on a path-specific basis (in which case it applies
-    only to that one specific
+        With the error method, an error is triggered if two non-empty values
+        are encountered, and the program will exit.
 
-    Structural information may be given for a specific path, in which case
-    it applies only to that exact path. It does not apply to structures
-    lower OR higher an NDS. Structural information may also be given with no
-    path, in which case it provides a default for all paths unless
-    overridden with information specific to a path.
+        The only difficulty is knowing what values are non-empty. If the
+        "keep" method is used, the merged list of the two lists above is:
 
-    The following structural information may be set:
+          @list = ( a, 2, ??, d)
 
-    ordered BOOLEAN [PATH]
-        By default, all lists are treated as unordered, but that can be
-        overridden, either on the global level, or path specific level, with
-        this descriptor.
+        The first element is obtained by merging "a" and "1", both of which
+        are non-empty, so the first value is kept.
 
-        If this is set to 1, the list at the given PATH is ordered, or if
-        PATH is omitted, all lists will default to ordered unless explicitly
-        set otherwise.
+        Likewise with the second element, since an undef value is empty.
 
-        If this is set to 0, the list(s) will be unordered.
+        The fourth element is also trivial since the fourth element only
+        exists in one of the two lists.
 
-    uniform_hash BOOLEAN
-        By default, hash keys are not uniform. By setting this descriptor to
-        1, they will default to uniform.
+        The only question is how to treat the empty string in @list1. By
+        default, the empty string is treated as an empty value, so the
+        merged list would be:
 
-    uniform_ol BOOLEAN
-        By default, all ordered lists are uniform. By setting this
-        descriptor to 0, they will be treated as non-uniform.
+          @list = ( a, 2, 3, d )
 
-        Note that there is no uniform_ul descriptor because ALL unordered
-        lists are treated as uniform (if structural information is being
-        used) since there is no consistent way for structural information to
-        apply to an unordered list which does not have uniform elements.
+        This behavior can be changed using the blank method described below.
+        Passing a true value to it causes the empty string to be treated an
+        an empty value, so the resulting merged list would be:
 
-    uniform BOOLEAN PATH
-        This can apply either to an ordered list or a hash. It is invalid
-        for other data types. It sets the element at the given path to be
-        explicitly uniform or not uniform.
+          @list = ( a, 2, '', d )
 
-        With respect to ordered lists, there are two caveats.
-
-        Caveat 1:
-
-        Hashes underneath the list element are uniform if the same key has
-        the same structure. It is not required that different keys have the
-        same structure.
-
-        For example, if the path "/a" refers to a uniform ordered list, and
-        "/a/0" is a hash with a key "key1" in it, and "/a/1" is a hash with
-        the key "key1" in it, both "/a/0/key1" and "/a/1/key1" have the same
-        structure. "/a/0/key2" can have a different structure however
-        (unless the hash is also defined as "uniform").
-
-        Caveat 2:
-
-        Ordered lists underneath the list element are uniform if the
-        elements at the same position have the same structure.
-
-        For example, if the path "/a" refers to a uniform ordered list, and
-        "/a/0" refers to an ordered list (so "/a/1" must also refer to an
-        ordered list, then both "/a/0/0" and "/a/1/0" must have the same
-        structure, but "/a/0/1" may be different (unless the second ordered
-        list is "uniform" also).
-
-    When specifying the path to set these items, any element in either a
-    uniform list or uniform hash should be defined with an asterix (*).
-
-    For example, if "/a" refers to a uniform list of data structures,
-    setting values for these elements should be done with "/a/*" instead of
-    "/a/0" or some other number. Likewise, uniform hashes should use an
-    asterix instead of a hash key.
-
-MERGE INFORMATION
-    Merge information is used to specify how different parts of a data
+SPECIFYING MERGE INFORMATION
+    Merge information is used to determine how different parts of a data
     structure are merged with other structures. Merge information may be
     given for a specific path or as a global default.
 
     In addition, merge information may be specified for different sets of
-    circumstances. For example, one type of "merger" would be to use one
+    circumstances. For example, one set of circumstances might be to use one
     data structure to provide defaults for another structure, but only when
-    that structure didn't already include a value. An alternate type of
+    that structure didn't already include a value. An alternate set of
     circumstances would be to have the second data structure override values
     in the first structure. Each set of circumstances may be given a ruleset
     name, and merge information can be set (either as global defaults or for
-    a specific path) for that set set of circumstances. The named
+    a specific path) for that set set of circumstances. The named set of
     circumstances is called a ruleset and is described in more detail below.
 
-    The following merge information may be set:
+    The following merge information may be set. Every item can be set on a
+    global default basis, or on a per-ruleset basis.
 
-    merge_hash METHOD [RULESET]
-        This provides the default merge method for hash mergers. If RULESET
-        is given, it is the default when that set of rules is specified in
-        the merger.
+    merge_hash
+        This specifies the default method to use when merging hashes.
 
-        If not specified, the "merge" method is the default.
+        If this is not specified, the "merge" method is the default.
 
-    merge_ol METHOD [RULESET]
-        This provides the default merge method for ordered list mergers. If
-        RULESET is given, it is the default when that set of rules is
-        specified in the merger.
+    merge_ol
+        This specifies the default method to use when merging ordered lists.
 
         If not specified, the "merge" method is the default.
 
-    merge_ul METHOD [RULESET]
-        This provides the default merge method for unordered list mergers.
-        If RULESET is given, it is the default when that set of rules is
-        specified in the merger.
+    merge_ul
+        This specifies the default method to use when merging unordered
+        lists.
 
         If not specified, the "append" method is the default.
 
-    merge_scalar METHOD [RULESET]
-        This provides the default merge method for ordered list mergers. If
-        RULESET is given, it is the default when that set of rules is
-        specified in the merger.
+    merge_scalar
+        This specifies the default method to use when merging scalars.
 
-        If not specified, the "merge" method is the default.
+        If not specified, the "keep" method is the default.
 
-    merge METHOD PATH [RULESET]
-        This provides the merge method for a specific path.
+    merge
+        This specifies the merge method to be used for a specific path. It
+        can only be set for a specific path, but may be set on a per-ruleset
+        basis.
+
+        The method overrides any defaults.
 
 RULE SETS
     It is sometimes desirable to have multiple ways defined to merge two
@@ -436,7 +533,104 @@ RULE SETS
     The "keep" ruleset has all settings set to "keep". The "replace" ruleset
     has them all set to "replace".
 
-METHODS
+USING A DATA::NDS OBJECT FOR MULTIPLE NDSes
+    Any number of NDSes (which share the same structure) can be associated
+    with a Data::NDS object. In that way, structural information can be
+    enforced across any number of similar data structures.
+
+    An NDS can be used explicitly in some Data::NDS method:
+
+       $obj  = new Data::NDS;
+       $nds  = { ... some structure ... };
+       $val  = $obj->value($nds,$path);
+
+    or it can be stored in the Data::NDS object in a named slot, so that it
+    can be easily referenced by name:
+
+       $obj->nds("my_nds",$nds);
+       $val  = $obj->value("my_nds",$path);
+
+    Any number of NDSes can be named and stored in the Data::NDS object.
+
+BASE METHODS
+    The following are methods for creating setting options for a Data::NDS
+    object.
+
+    new
+          $obj = new Data::NDS;
+
+        This creates a new Data::NDS object. It can be used to work with any
+        number of NDSes that share the same structural information. In order
+        to work with NDSes with different structural information, you must
+        create separate Data::NDS objects for each.
+
+    version
+          $version = $obj->version();
+
+        Returns the version of the module.
+
+    no_structure
+          $obj->no_structure();
+
+        If this is called, it will turn off structural information. Because
+        NDS information is stored in the Data::NDS object, and turning off
+        structural information means that structural data will no longer be
+        kept, you cannot toggle it back on. Instead, you will need to create
+        a new Data::NDS object if structural information is needed.
+
+    blank
+          $obj->blank(BOOLEAN);
+
+        This sets a flag which determines whether an empty string should be
+        treated as an empty value, or as a defined value.
+
+        In a data structure, anywhere a scalar is included, an empty string
+        ('') may be included. When merging two such structures, there are
+        two ways to treat empty strings.
+
+        The default is to treat them as an empty value. For example, merging
+        two hashes:
+
+          %nds1 = ( a => '',
+                    b => undef )
+          %nds2 = ( a => 1,
+                    b => 2 )
+
+        using the "keep" method (for merging the scalars), would give:
+
+          %nds = ( a => 1,
+                   b => 2 )
+
+        since each pair of scalars will be compared and the first non-empty
+        value will be kept.
+
+        If this method is called and a true value is passed in:
+
+          $obj->blank(1);
+
+        an empty string will be treated as a non-empty value, and it will be
+        kept, so the resulting merged structure would be:
+
+          %nds = ( a => '',
+                   b => 2 )
+
+    err
+    errmsg
+          $err = $obj->err();
+
+        This tests to see if the last function failed. If it did, $err is
+        the error code set by that function.
+
+        Error codes in this module described and listed below in the ERROR
+        CODES section.
+
+        Every error also produces a text version of the error. The function:
+
+          $msg = $obj->errmsg();
+
+        will return the text version of the error.
+
+PATH METHODS
     When referring to the arguments passed to a method, $path always refers
     to the path in an NDS. $path can be passed in as a delimited string, or
     as a list reference where the list contains the elements of the path. So
@@ -450,29 +644,6 @@ METHODS
     either be a reference to a structure, or the name of an NDS stored in
     the object using the "nds" method.
 
-    new
-          $obj = new Data::NDS;
-
-    version
-          $version = $obj->version();
-
-        Returns the version of the module.
-
-    warnings
-          $obj->warnings(BOOLEAN);
-
-        If a true value is passed in, the module will issue warnings when
-        they are encountered.
-
-    structure
-          $obj->structure(BOOLEAN);
-
-        If a true value is pushed in, the module will keep track of the
-        structure of the NDS and do checks on it where possible. If a false
-        value is pushed in, it will not keep track of structure.
-
-        The default is to keep track of structure.
-
     delim
           $obj->delim();
           $obj->delim($delim);
@@ -481,28 +652,6 @@ METHODS
         slash (/). This can be changed using this function. Any string can
         be used as the delimiter. If called with no argument, it returns the
         delimiter.
-
-    ruleset
-          $err = $obj->ruleset($name);
-
-        This creates a ruleset of the given name. $name must be
-        alphanumeric, and must be created only a single time. The following
-        names are reserved and may not be used:
-
-          keep
-          replace
-
-        Error codes are:
-
-          0     no error
-          1     name not alphanumeric
-          2     name previously created
-          3     using a reserved ruleset name
-
-    ruleset_valid
-          $flag = $obj->ruleset_valid($name);
-
-        This returns 1 if $name is a valid ruleset, 0 otherwise.
 
     path
           @path = $obj->path($path);
@@ -535,47 +684,78 @@ METHODS
 
         are identical.
 
-    nds There are several different ways in which this method can be called.
+RULESET METHODS
+    The following methods are used for creating a rulesets.
 
-          $err = $obj->nds($name,$nds);
-          $err = $obj->nds($name,$nds,$new);
+    ruleset
+          $obj->ruleset($name);
 
-        These forms stores an NDS in the object under a given NAME ($name).
+        This creates a ruleset of the given name. $name must be
+        alphanumeric, and must be created only a single time. The following
+        names are reserved and may not be used:
+
+          keep
+          replace
+          default
+          override
+
+        This sets an error code if a problem with the ruleset is
+        encountered.
+
+    ruleset_valid
+          $flag = $obj->ruleset_valid($name);
+
+        This returns 1 if $name is a valid ruleset, 0 otherwise.
+
+NDS METHODS
+    These methods are for working with single NDSes. They can be used to
+    examine information in an NDS, or associate an NDS with a Data::NDS
+    object.
+
+    nds This function is for working with named NDSes stored in a Data::NDS
+        object.
+
+        There are several different ways in which this method can be called.
+
+          $obj->nds($name,$nds [,$new]);
+
+        This forms stores an NDS in the Data::NDS object under a given name.
         If structural information is kept, it will check the structure of
         the NDS for problems. It will update structural information based on
-        the NDS if $new is passed in and is true.
+        the NDS if a non-zero value of $new is passed in.
 
-        The error value is the value of the check_structure method or -1 if
-        a named NDS doesn't exist.
+          $obj->nds($name,$name2);
 
-        If $nds is passed in as a reference, the actual structure (NOT a
-        copy of it) is stored. If $nds is passed in as the name of a stored
-        NDS, a copy of the structure will be stored under the new name.
+        This takes an NDS stored under the name $name2 and stores a copy of
+        it under the new name ($name).
 
-          $nds = $obj->nds($name);
+          $nds = $obj->nds($name [,"_copy"]);
 
-        This retrieves the named NDS from the object. If it does not exist,
-        it will return nothing. It returns the actual stored NDS, NOT a copy
-        of it, so modifying the returned NDS in any way will modify the
-        stored copy.
+        This will retrieve the NDS stored under the name $name. If it does
+        not exist, undef is returned. It returns the actual stored NDS, NOT
+        a copy of it, if there is no second argument. If the second argument
+        is "_copy", a copy of the structure is returned.
 
-          $nds = $obj->nds($name,"_copy");
-
-        This is similar to the previous function but it will return a copy
-        of the named NDS.
-
-          $obj->nds($name,"_delete");
+          $flag = $obj->nds($name,"_delete");
 
         This will delete the named NDS from the object. If the named NDS
         does not exist, it will return 0, otherwise it will return 1.
 
+          $flag = $obj->nds($name,"_exists");
+
+        Returns 1 if an NDS is stored under the given name.
+
+        This method may produce error codes due to invalid structure, or if
+        any problem using a named NDS are encountered.
+
     empty
           $isempty = $obj->empty($nds);
 
-        An NDS is empty if it only contains undef values.
+        By default, an NDS is empty if it only contains empty values.
 
-        A scalar is empty if it is undef. The empty string "" is NOT treated
-        as empty.
+        A scalar is empty if it is undef. By default, the empty string "" is
+        also treated as empty, but this can be changed using the "blank"
+        method described above.
 
         A list is empty if it contains 0 elements, or if every element in it
         is empty.
@@ -583,54 +763,21 @@ METHODS
         A hash is empty if it contains 0 keys, or if the value of every key
         is empty.
 
-        The return value of the method is:
-
-          0   if the NDS is not empty
-          1   if the NDS is empty
-
-    valid
-          ($valid,$val,$where) = $obj->valid($nds,$path [,$copy]);
-
-        This checks the $nds that is passed in (which can be either a
-        structure or a named element) to see if $path is valid.
-
-        If $path exists in $nds, it returns two values. The first is 1
-        meaning that the path exists. The second is the value at that path.
-        The value at the path is the actual value, NOT a copy of it (unless
-        $copy is passed in, in which case it IS a copy).
-
-        If $path does not exist in $nds, it returns three values. The first
-        is 0 meaning that the path is not valid. The second one is an error
-        code with more information about the error:
-
-         -1   an NDS was passed in by name, but it is
-              not valid (in this case, only two elements
-              are returned)
-
-          0   the path doesn't exist in $nds
-          1   a hash key doesn't exist
-          2   a list element doesn't exist
-
-         10   the $nds has a scalar at a point which
-              should refer to either a hash or array
-         11   the $nds has a reference to an unsupported
-              data type where it should refer to either
-              a hash or array
-         12   a non-integer value was used to access a
-              list
-
-        The third value is the path at which the error occurred.
-
-        This method does NOT do any structural checking.
+        Returns undef if an error occurs. Otherwise, it returns 1 if $nds is
+        empty, 0 if it is not empty.
 
     value
-          $val = $obj->value($nds,$path);
+          $val = $obj->value($nds,$path [,$copy]);
 
-        This returns the value of the NDS at the given path. If any error
-        ocurs, undef is returned.
+        This checks to see that the NDS passed in is valid, and if the given
+        path exists in it.
 
-        Note: this is simply a wrapper around the valid method, so to figure
-        out what error occured, call valid directly.
+        If everything is valid, it returns the value stored at $path. If
+        $copy is passed in, a copy of the structure stored there is
+        returned, otherwise the actual structure is returned.
+
+        In the case of an error, nothing is returned and an error code is
+        set.
 
     keys, values
           @ele = $obj->keys($nds,$path);
@@ -654,138 +801,77 @@ METHODS
         Undef is returned in the case of an error.
 
     erase
-          $err = $obj->erase($nds,$path);
+          $flag = $obj->erase($nds,$path);
 
         This will delete the given path from the NDS. It will delete
         elements from lists, clear elements from ordered lists, or delete
         entries from hashes.
 
-        The return value of the method is:
+        It returns undef if an error occurred, 1 if the path was erased, 0
+        otherwise.
 
-          0   if there is no error
-          1   if an undefined NDS is passed in by name
-          2   if the path is invalid in this NDS
+STRUCTURE METHODS
+    These methods are for working with the structure of an NDS.
 
     set_structure
-          $err = $obj->set_structure($item,$val [,$path]);
+          $obj->set_structure($item,$val [,$path]);
 
         This sets the given item of structural information. If the path is
         given, it sets items for that path, otherwise it sets default
         structural items.
 
-        It returns 0 if there was no error, or else an error code. Several
-        warnings may be issued if $obj->warnings has been called. The
-        following error codes are used:
-
-            1  Trying to set "type" to an invalid value
-            2  Trying to reset "type"
-            3  Trying to set "type" to a non-array/hash type when scalar/other
-               is not valid
-
-           10  Trying to set an unknown default structural item
-           11  Trying to set an unknown structural item for a path
-
-          100  Trying to set an "ordered" flag to something other than 0/1
-          101  Trying to use an "ordered" flag on something other than an array
-          102  Trying to reset "ordered" (or trying to set a non-uniform list to
-               unordered)
-
-          110  Trying to set an "uniform" flag to something other than 0/1
-          111  Trying to use an "uniform" flag on something other than an array/hash
-          112  Trying to reset "uniform" (or trying to set an unordered list to
-               non-uniform)
-
-          130  Trying to set structural information for a child with
-               a scalar/other parent
-
-          140  Trying to set structural information for a specific element
-               in a "uniform" array
-          141  Trying to set structural information for all list elements in
-               a non-uniform array
-
-          150  Trying to access a list with a non-integer index
-
-          160  Trying to set structural information for a specific element
-               in a uniform hash/array
-          161  Trying to set structural information for all elements of a
-               non-uniform hash/array
-
-          170  Trying to set the default ordered value to something other than 0/1
-
-          180  Trying to set the default uniform_hash value to something other
-               than 0/1
-          181  Trying to set the default uniform_ol value to something other
-               than 0/1
-
     get_structure
           $val = $obj->get_structure($path [,$info]);
 
         This gets a piece of structural information for a path. $info can be
-        any of the following:
+        any of the following (and defaults to "type" if it is not given):
 
-          type      (this is the default) (returns "unknown" if not set)
+          type      (returns "unknown" if not set)
           ordered
           uniform
           merge
           keys
+          valid     (this will return 1 if the path is valid)
 
         The appropriate value is returned. If information for a specific
         path is not available, default values will be returned. It returns
-        nothing if the path has no structural information available.
+        nothing if the path has no structural information available and the
+        error code lists the reason.
 
         The keys information is a list of all known keys that can appear in
         a hash. This may only be used to query keys in a non-uniform hash.
 
     check_structure
-          ($err,$val) = $obj->check_structure($nds [,$new]);
+          $obj->check_structure($nds [,$new]);
 
         This will take an NDS and traverse through it, checking the
         structure of every part of it. If $new is passed in, it is allowed
         to contribute new structural information. Otherwise, it must be
-        completely defined by previously declared structural information.
-
-        Error codes are:
-
-          1   New structure found (but not allowed)
-          2   Structure of invalid type found
-
-        The value returned in the case of an error is the path where the
-        error occurred.
+        completely defined by previously declared structural information. If
+        the structure is invalid, an error code will be set.
 
     check_value
-          ($err,$val) = $obj->check_value($path,$val [,$new]);
+          $obj->check_value($path,$val [,$new]);
 
         This will check to see if $val has the correct structure to be
         stored at $path in an NDS. It will traverse through the structure of
         $val, similar to how the check_structure method traverses through an
         entire NDS.
 
-        The values of $new, $err, and $val are the same as in the
+        The values of $new, $err, and $errmsg are the same as in the
         check_structure method.
 
+MERGE METHODS
+    Methods for merging two NDSes together.
+
     set_merge
-          $err = $obj->set_merge($item,$method [,$ruleset]);
-          $err = $obj->set_merge($item,$path,$method [,$ruleset]);
+          $obj->set_merge($item,$method [,$ruleset]);
+          $obj->set_merge($item,$path,$method [,$ruleset]);
 
         This will define how to merge values. In the first form, it will set
         the default. $item can be merge_hash, merge_ol, merge_ul, or
         merge_scalar. In the second form, it will set the merge method for
         the given path. Currently, $item must be "merge".
-
-          10   Trying to set an unknown value
-
-          100  Trying to set merge_hash to an invalid value
-          101  Trying to set merge_ol to an invalid value
-          102  Trying to set merge_ul to an invalid value
-          103  Trying to set merge_scalar to an invalid value
-
-          120  Trying to reset "merge" value for a path
-          121  Trying to set "merge" for a path with no known type
-
-          130  Invalid merge method for ordered list merging
-          131  Invalid merge method for unordered list merging
-          132  Invalid merge method for hash merging
-          133  Invalid merge method for scalar/other merging
 
     get_merge
           $method = $obj->get_merge($path [,$ruleset]);
@@ -797,7 +883,7 @@ METHODS
         returned in the event of a problem.
 
     merge
-          $err = $obj->merge($nds1,$nds2 [,$ruleset] [,$new]);
+          $obj->merge($nds1,$nds2 [,$ruleset] [,$new]);
 
         This will take two NDSes (each of which can be passed in by name or
         by reference) and will recursively merge the second one into the
@@ -809,19 +895,11 @@ METHODS
         The name of a ruleset can be passed in. If it is, that set of merge
         rules will be used to do the merging.
 
-        If $new is passed in, it must be 0 or 1. If it is 1, $nds2 may
-        provide new structural information. If $new is 0, $nds2 must be
-        totally described by existing structural descriptions.
-
-          0   no error
-          1   $nds1 refers to a named NDS that does not exist
-          2   $nds2 refers to a named NDS that does not exist
-          3   $nds1 has an invalid structure
-          4   $nds2 has an invalid structure
-          5   $nds1/$nds2 not list/hash ref
+        If $new is passed in, it must be 0 or 1. If it is 1, Either NDS may
+        provide new structural information.
 
     merge_path
-          $err = $obj->merge_path($nds,$val,$path [,$ruleset] [,$new]);
+          $obj->merge_path($nds,$val,$path [,$ruleset] [,$new]);
 
         This will take an NDS (which can be passed in by name or reference)
         and merge $val into it at the given path. Using the special rulesets
@@ -835,12 +913,25 @@ METHODS
 
         The actual value passed in (not a copy) will be merged in.
 
-        The error code is:
+OTHER METHODS
+    which
+           %hash = $obj->which($nds,@args)
 
-          0   no error
-          1   a named NDS does not exist
-          2   $nds has an invalid structure
-          3   $val has an invalid structure
+        This returns a hash of { PATH => VAL } where PATH is a path in $nds
+        and VAL is the value at that path.
+
+        The paths returned all fit the criteria specified in the arguments.
+
+        If no arguments are passed in, a hash of all paths to non-empty
+        scalars is returned (note that this means that scalars set to the
+        empty string '' ARE returned).
+
+        If @args is passed in, it is a list of criteria. If a scalar matches
+        any one of them, it passes. Currently, @args may consist of a list
+        of values (scalars) or regular expressions (set using the qr//
+        operator). If the value at a path is equal to any of the values
+        passed in in @args, or matches any of the regular expressions, then
+        it passes.
 
     identical, contains
           $flag = $obj->identical($nds1,$nds2 [,$new] [,$path]);
@@ -861,28 +952,15 @@ METHODS
         undef is returned if there is any error.
 
         NOTE: because unordered lists must be compared in every possible
-        combination, and recursively if the structure contains unordered
+        combination, and recursively, if the structure contains unordered
         lists which contain other unordered lists deeper in the structure,
-        comparing NDSes with unordered lists can be extremely slow.
+        comparing NDSes with unordered lists can be extremely slow. Doing
+        this is strongly discouraged.
 
-    which
-           %hash = $obj->which($nds,@args)
+        Error codes are:
 
-        This returns a hash of { PATH => VAL } where PATH is is a path in
-        $nds and VAL is the value at that path.
-
-        The paths returned all fit the criteria specified in the arguments.
-
-        If no arguments are passed in, a hash of all paths to non-empty
-        scalars is returned (note that this means that scalars set to the
-        empty string '' ARE returned).
-
-        If @args is passed in, it is a list of criteria. If a scalar matches
-        any one of them, it passes. Currently, @args may consist of a list
-        of values (scalars) or regular expressions (set using the qr//
-        operator). If the value at a path is equal to any of the values
-        passed in in @args, or matches any of the regular expressions, then
-        it passes.
+           1   the first NDS is invalid
+           2   the second NDS is invalid
 
     print
            $string = $obj->print($nds,%opts);
@@ -905,7 +983,149 @@ METHODS
                                 Default:  the number of levels that can be
                                           displayed given indent and width
 
-        The NDS passed in must be a structure, not a named NDS.
+    paths
+           @path = $obj->paths(@type);
+
+        This returns a list of all valid paths of the given type. @type is a
+        list of strings. The list can contain any one of the following:
+
+           scalar
+           list
+           hash
+
+        It can optionally also contain one of:
+
+           uniform
+           nonuniform
+
+        and one of:
+
+           ordered
+           unordered
+
+        It will return all paths which match all of the values.
+
+ERROR CODES
+    Each error code produced by a method in the Data::NDS module is prefixed
+    by the characters "nds", followed by a 3 character operation code which
+    tells what type of operation failed, followed by 2 digits.
+
+    The following error codes are used to identify problems working with
+    named NDSes:
+
+      ndsnam01   A named NDS was referred to, but no NDS is stored
+                 under that name.
+      ndsnam02   Attempt to copy an NDS to a name already in use.
+
+    The following error codes are set if a problem with a ruleset is
+    encountered:
+
+      ndsrul01   A non-alphanumeric character used in a ruleset
+                 name.
+      ndsrul02   An attempt was made to create a ruleset using
+                 a name that is already in use.
+      ndsrul03   An attempt was made to create a ruleset using one
+                 of the reserved names.
+
+    The following error codes are set if there is a problem checking the
+    structure of an NDS:
+
+      ndschk01   The NDS contains structure of a different type
+                 than is valid. The errmsg method will tell exactly
+                 where the error occurred.
+      ndschk02   An NDS with new structure was checked, but new
+                 structure is not allowed. Use the $new argument
+                 in the calling function to allow it.
+      ndschk03   No structural information is available at all.
+      ndschk04   The path is invalid.
+      ndschk05   It is unknown what type of data is stored at the
+                 given path.
+      ndschk06   Ordered information requested for a non-list structure.
+      ndschk07   Uniform information requested for a scalar/other
+                 structure.
+      ndschk08   Keys requested for a non-hash structure.
+      ndschk09   Keys requested for a uniform hash structure.
+      ndschk99   Unknown structural information requested.
+
+    The following eror codes are set if there a problem setting the
+    structural information of an NDS:
+
+      ndsstr01   Attempt to set type to an invalid value.
+      ndsstr02   Once type is set, it may not be reset.
+      ndsstr03   Attempt to set type to scalar when a list/hash type is
+                 required (due to other structural information).
+      ndsstr04   Attempt to reset "ordered" (or trying to set a
+                 non-uniform list to unordered).
+      ndsstr05   Attempt to set ordered on a non-list structure.
+      ndsstr06   Ordered value must be 0 or 1.
+      ndsstr07   Attempt to reset "uniform" (or trying to set an
+                 unordered list to non-uniform).
+      ndsstr08   Attempt to use an "uniform" flag on something other
+                 than a list/hash.
+      ndsstr09   Uniform value must be 0 or 1.
+      ndsstr10   Attempt to set structural information for a child with
+                 a scalar/other parent.
+      ndsstr11   Attempt to set structural information for a specific
+                 element in a "uniform" list.
+      ndsstr12   Attempt to set structural information for all
+                 elements in a "non-uniform" list.
+      ndsstr13   Attempt to access a list with a non-integer index.
+      ndsstr14   Attempt to set structural information for a specific
+                 element in a uniform hash/list.
+      ndsstr15   Attempt to set structural information for all elements
+                 of a non-uniform hash/list.
+      ndsstr16   Attempt to set the default ordered value to something
+                 other than 0/1.
+      ndsstr17   Attempt to set the default uniform_hash value to
+                 something other than 0/1.
+      ndsstr18   Attempt to set the default uniform_ol value to
+                 something other than 0/1.
+      ndsstr98   Invalid default structural item.
+      ndsstr99   Invalid structural item for a path.
+
+    The following error codes are used to report problems when examining an
+    NDS, either to get data, or to get structural information:
+
+      ndsdat01   A path does not exist in the NDS.
+      ndsdat02   A hash key does not exist in the NDS.
+      ndsdat03   A list element does not exist in the NDS.
+      ndsdat04   The NDS has a scalar at a point where a hash or
+                 list should be.
+      ndsdat05   The NDS has a reference to an unsupported data type
+                 where a hash or list should be.
+      ndsdat06   A non-integer index used to access a list.
+      ndsdat07   Invalid parameter combination in paths method.
+      ndsdat08   Invalid parameter in paths method.
+
+    The following error codes are set with problems related to merge
+    operations:
+
+      ndsmer01   Attempt to set a merge setting to an unknown value.
+      ndsmer02   Attempt to set merge_hash to an invalid value.
+      ndsmer03   Attempt to set merge_ol to an invalid value.
+      ndsmer04   Attempt to set merge_ul to an invalid value.
+      ndsmer05   Attempt to set merge_scalar to an invalid value.
+      ndsmer06   Attempt to reset "merge" value for a path.
+      ndsmer07   Attempt to set "merge" for a path with no known type.
+      ndsmer08   Invalid merge method for ordered list merging.
+      ndsmer09   Invalid merge method for unordered list merging.
+      ndsmer10   Invalid merge method for hash merging.
+      ndsmer11   Invalid merge method for scalar/other merging.
+      ndsmer12   While merging, the first NDS is not defined.
+      ndsmer13   While merging, the second NDS is not defined.
+      ndsmer14   The first NDS has an invalid structure. Use the
+                 check_structure method to determine the problem.
+      ndsmer15   The second NDS has an invalid structure. Use the
+                 check_structure method to determine the problem.
+      ndsmer16   The NDS must be a list or hash.
+      ndsmer17   Attempt to merge a value into an undefined NDS.
+      ndsmer18   The NDS has an invalid structure.
+      ndsmer19   The value has an invalid structure.
+
+    The following error codes apply to identical and contains operations:
+
+      ndside01   The first NDS is invalid.
+      ndside02   The second NDS is invalid.
 
 EXAMPLES
     All examples assume the following lines:
@@ -953,11 +1173,10 @@ EXAMPLES
               => { "a" => [ "a1", "a2" ],
                    "b" => [ "b1", "b2" ] }
 
-    valid, value methods
-        The valid method is used to check to see if a path is valid in the
-        given NDS. It returns a 0/1 if the path is valid. If it is valid, it
-        also returns the value at the path. If it is not valid, it returns
-        an error code and the path where the error occurred.
+    value method
+        The value method is used to check to see if a path is valid in the
+        given NDS. It returns the value stored at the path, if it is valid.
+        It also sets an error code if the NDS is not valid.
 
            $nds = { "a" => undef,
                     "b" => "foo",
@@ -965,27 +1184,19 @@ EXAMPLES
                     "d" => { "d1k" => "d1v", "d2k" => "d2v" },
                   };
 
-           $obj->valid($nds,"/a");
-              => ( 1 undef )
+           $obj->value($nds,"/a");
+              => undef
 
-           $obj->valid($nds,"/d/d3k");
-              => ( 0 1 /d/d3k )
+           $obj->value($nds,"/d/d3k");
+              => undef
 
-           $obj->valid($nds,"/f/1/2");
-              => ( 0 1 /f )
+           $obj->value($nds,"/f/1/2");
+              => undef
 
-           $obj->valid($nds,"/c/1");
-              => ( 1 c2 )
-
-           $obj->valid($nds,"/c/x");
-              => ( 0 12 /c/x )
-
-        The value method is simply a wrapper around valid.
-
-           $val = $obj->value($nds,"/c/1");
+           $obj->value($nds,"/c/1");
               => c2
 
-           $val = $obj->value($nds,"/c/x");
+           $obj->value($nds,"/c/x");
               => undef
 
     keys, values methods
@@ -1018,20 +1229,20 @@ EXAMPLES
         To make sure that the path "/a" refers to a uniform hash, make the
         following two calls:
 
-           $err = $obj->set_structure("type","hash","/a");
-           $err = $obj->set_structure("uniform",1,"/a");
+           $obj->set_structure("type","hash","/a");
+           $obj->set_structure("uniform",1,"/a");
 
         To make sure that "/b" is an ordered list, and all elements in it
         are hashes, use the following calls:
 
-           $err = $obj->set_structure("type","array","/b");
-           $err = $obj->set_structure("ordered",1,"/b");
-           $err = $obj->set_structure("type","hash","/b/*");
+           $obj->set_structure("type","list","/b");
+           $obj->set_structure("ordered",1,"/b");
+           $obj->set_structure("type","hash","/b/*");
 
         get_structure will return the structural information for a path:
 
            $info = $obj->get_structure("/b","type");
-              => array
+              => list
 
     erase method
            $obj->set_structure("ordered","1","/o");
@@ -1076,7 +1287,7 @@ EXAMPLES
            $obj->set_structure("type","hash","/hu");
            $obj->set_structure("uniform",1,"/hu");
 
-           $obj->set_structure("type","array","/ul");
+           $obj->set_structure("type","list","/ul");
            $obj->set_structure("ordered",0,"/ul");
 
         To check a structure to see if it fits this structure, use the
@@ -1084,11 +1295,9 @@ EXAMPLES
 
            $a = { "hu" => { "h1" => "h1v" } };
            $obj->check_structure($a,1);
-              => ( 0 )
 
            $b = { "hu" => [ 1, 2 ] };
            $obj->check_structure($b,1);
-              => ( 2 /hu )
 
         You can also add structural information by passing in an NDS that
         goes beyond whatever structure you have defined with set_structure.
@@ -1101,11 +1310,9 @@ EXAMPLES
 
            $b = { "ul" => [ { "aa" => 11 } ] };
            $obj->check_structure($b,0);
-              => ( 1 /ul/* )
 
            $b = { "ul" => [ { "aa" => 11 } ] };
            $obj->check_structure($b,1);
-              => ( 0 )
 
         In the first instance, the check_structure function returns an error
         code since the structure passed in contains structure that was not
@@ -1121,21 +1328,18 @@ EXAMPLES
 
            $c = { "ul" => [ "foo" ] };
            $obj->check_structure($c,1);
-              => ( 2 /ul/* )
 
     set_merge, get_merge methods
         To set the default merge method for a hash to be "keep" (see above
         for description of the various merge methods):
 
            $obj->set_merge("merge_hash","keep");
-              => 0
 
         To set the merge method for a single element in an NDS, use
         something like the following:
 
            $err = $obj->set_structure("type","hash","/h");
            $obj->set_merge("merge","/h","keep");
-              => 0
 
         The get_merge method can be used to query the type of merge that is
         done for a path:
@@ -1194,27 +1398,27 @@ EXAMPLES
         Merging hashes using keep, replace, and merge:
 
            $obj->set_merge("merge_hash","keep");
-           $a = { "a"  => 1,
+           $a = { "a" => 1,
                   "b" => 2 };
-           $b = { "a"  => 3,
+           $b = { "a" => 3,
                   "c" => 4 };
            $obj->merge($a,$b,1);
               => $a = { a => 1,
                         b => 2 }
 
            $obj->set_merge("merge_hash","replace");
-           $a = { "a"  => 1,
+           $a = { "a" => 1,
                   "b" => 2 };
-           $b = { "a"  => 3,
+           $b = { "a" => 3,
                   "c" => 4 };
            $obj->merge($a,$b,1);
               => $a = { a => 3,
                         c => 4 }
 
            $obj->set_merge("merge_hash","merge");
-           $a = { "a"  => 1,
+           $a = { "a" => 1,
                   "b" => 2 };
-           $b = { "a"  => 3,
+           $b = { "a" => 3,
                   "c" => 4 };
            $obj->merge($a,$b,1);
               => $a = { a => 1,
@@ -1283,7 +1487,7 @@ EXAMPLES
                   { "x"  => 33 },
                   { "d"  => 44 } ];
 
-           $obj->set_structure("type",    "array", "/");
+           $obj->set_structure("type",    "list", "/");
            $obj->set_structure("ordered", 1,       "/");
 
            $obj->set_structure("type",    "hash",  "/*");
@@ -1387,6 +1591,18 @@ EXAMPLES
                         c => 33 }
 
 BACKWARDS INCOMPATIBILITIES
+    3.00
+        The structure method was removed and replaced with a no_structure
+        method.
+
+        The handling of values which are the empty string is now consistent,
+        but not completely backwards compatible.
+
+        Added the err and errmsg functions, and changed the return values of
+        almost all of the functions (errors are no longer returned).
+
+        The word "array" was changed to "list" everywhere.
+
     1.01
         The keys and values methods now only return non-empty elements.
 
@@ -1398,6 +1614,12 @@ BACKWARDS INCOMPATIBILITIES
 
 KNOWN PROBLEMS
     None at this point.
+
+SEE ALSO
+      perlreftut - Perl references short introduction
+      perldsc    - Perl data structures intro
+      perllol    - Perl data structures: arrays of arrays
+      perldata   - Perl data structures
 
 LICENSE
     This script is free software; you can redistribute it and/or modify it

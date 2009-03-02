@@ -18,116 +18,116 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
-  return $obj->set_structure(@test);
+  $obj->set_structure(@test);
+  return $obj->err();
 }
 
 $obj = new Data::NDS;
 
-$$obj{"struct"} = { "/z"  => { "type"    => "array/hash",
+$$obj{"struct"} = { "/z"  => { "type"    => "list/hash",
                              },
                   };
 
 $tests = "
 
-type hash / ~ 0
+type hash / ~ _blank_
 
-type foo /a ~ 1
+type foo /a ~ ndsstr01
 
-type hash /a ~ 0
+type hash /a ~ _blank_
 
-type scalar /a ~ 2
+type scalar /a ~ ndsstr02
 
-type scalar /z ~ 3
+type scalar /z ~ ndsstr03
 
-type array /z ~ 0
+type list /z ~ _blank_
 
-foo keep ~ 10
+foo keep ~ ndsstr99
 
-foo x /a ~ 11
+foo x /a ~ ndsstr98
 
-type array /b ~ 0
+type list /b ~ _blank_
 
-ordered x /b ~ 100
+ordered x /b ~ ndsstr06
 
-ordered 1 /a ~ 101
+ordered 1 /a ~ ndsstr05
 
-ordered 1 /b ~ 0
+ordered 1 /b ~ _blank_
 
-ordered 0 /b ~ 102
+ordered 0 /b ~ ndsstr04
 
-type array /c ~ 0
+type list /c ~ _blank_
 
-uniform 0 /c ~ 0
+uniform 0 /c ~ _blank_
 
-ordered 0 /c ~ 102
+ordered 0 /c ~ ndsstr04
 
-type array /d ~ 0
+type list /d ~ _blank_
 
-uniform x /d ~ 110
+uniform x /d ~ ndsstr09
 
-type scalar f ~ 0
+type scalar f ~ _blank_
 
-uniform 1 /f ~ 111
+uniform 1 /f ~ ndsstr08
 
-uniform 1 /d ~ 0
+uniform 1 /d ~ _blank_
 
-uniform 0 /d ~ 112
+uniform 0 /d ~ ndsstr07
 
-type array /e ~ 0
+type list /e ~ _blank_
 
-ordered 0 /e ~ 0
+ordered 0 /e ~ _blank_
 
-uniform 0 /e ~ 112
+uniform 0 /e ~ ndsstr07
 
-type scalar /k ~ 0
+type scalar /k ~ _blank_
 
-type hash /k/l/m ~ 130
+type hash /k/l/m ~ ndsstr10
 
-type array /g ~ 0
+type list /g ~ _blank_
 
-uniform 1 /g ~ 0
+uniform 1 /g ~ _blank_
 
-type array /g/1 ~ 140
+type list /g/1 ~ ndsstr11
 
-type array /g/* ~ 0
+type list /g/* ~ _blank_
 
-type array /h ~ 0
+type list /h ~ _blank_
 
-uniform 0 /h ~ 0
+uniform 0 /h ~ _blank_
 
-type array /h/1 ~ 0
+type list /h/1 ~ _blank_
 
-type array /h/* ~ 141
+type list /h/* ~ ndsstr12
 
-type array /h/foo ~ 150
+type list /h/foo ~ ndsstr13
 
-type hash /i ~ 0
+type hash /i ~ _blank_
 
-uniform 1 /i ~ 0
+uniform 1 /i ~ _blank_
 
-type array /i/x ~ 160
+type list /i/x ~ ndsstr14
 
-type array /i/* ~ 0
+type list /i/* ~ _blank_
 
-type hash /j ~ 0
+type hash /j ~ _blank_
 
-uniform 0 /j ~ 0
+uniform 0 /j ~ _blank_
 
-type array /j/x ~ 0
+type list /j/x ~ _blank_
 
-type array /j/* ~ 161
+type list /j/* ~ ndsstr15
 
-ordered 2 ~ 170
+ordered 2 ~ ndsstr16
 
-uniform_hash 2 ~ 180
+uniform_hash 2 ~ ndsstr17
 
-uniform_ol 2 ~ 181
+uniform_ol 2 ~ ndsstr18
 
 ";
 
 print "set_structure...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

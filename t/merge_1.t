@@ -144,7 +144,7 @@ $nds = {
         "ul_append2"  => [ "val_1b", "val_2b", undef ],
        };
 
-$obj->merge_path("ele",$nds,"/",1);
+$obj->merge("ele",$nds,1);
 
 $tests =
 [
@@ -255,7 +255,7 @@ $tests =
 
 ];
 
-print "merge_path (top)...\n";
+print "merge...\n";
 test_Func(\&test,$tests,$runtests);
 
 1;

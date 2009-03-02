@@ -1,11 +1,20 @@
 package Data::NDS;
-# Copyright (c) 2008-2008 Sullivan Beck. All rights reserved.
+# Copyright (c) 2008-2009 Sullivan Beck. All rights reserved.
 # This program is free software; you can redistribute it and/or modify it
 # under the same terms as Perl itself.
 
 ########################################################################
 # TODO
 ########################################################################
+
+# If no structural information is kept, merge methods can only
+# keep/replace/append for lists but unordered non-uniform lists
+# are allowed.
+
+# When specifying structure, /foo/* forces uniform if it is not
+# already specified as non-uniform. If a structure is uniform,
+# then applying structure to /foo/1 is equivalent to /foo/* (but
+# a warning may be issued).
 
 # Add validity tests for data
 # see Data::Domain, Data::Validator
@@ -21,9 +30,6 @@ package Data::NDS;
 #    a list consisting of only undefs should be deleted (and fix parent)
 #    a hash with no keys should be deleted (and fix parent)
 
-# Add ability to ignore structural information so that lists can
-# be unordered and non-uniform ???
-
 ########################################################################
 
 require 5.000;
@@ -34,7 +40,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "1.05";
+$VERSION = "3.00";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;
@@ -53,6 +59,10 @@ $_DBG_POINT  = 0;
 #   delim     => DELIMITER                               the path delimiter
 #   nds       => { NAME       => NDS }                   named NDSes
 #   structure => FLAG                                    whether to do structure
+#   blank     => FLAG                                    whether the empty
+#                                                        string is treated as
+#                                                        a keepable value when
+#                                                        merging
 #   struct    => { PATH       => { ITEM => VAL } }       structural information
 #   defstruct => { ITEM       => VAL }                   default structure
 #   ruleset   => { RULESET    => { def  => { ITEM => VAL },
@@ -60,25 +70,29 @@ $_DBG_POINT  = 0;
 #                                                        default and path
 #                                                        specific ruleset
 #                                                        merge methods
+#   cache     => {...}                                   cached information
 # }
 
 sub new {
-  my($class) = @_;
+   my($class) = @_;
 
-  my $self = {
-              "warn"      => 0,
-              "delim"     => "/",
-              "nds"       => {},
-              "structure" => 1,
-              "struct"    => {},
-              "defstruct" => {},
-              "ruleset"   => {},
-             };
-  _structure_defaults($self);
-  _merge_defaults($self);
-  bless $self, $class;
+   my $self = {
+               "warn"      => 0,
+               "delim"     => "/",
+               "nds"       => {},
+               "structure" => 1,
+               "blank"     => 0,
+               "struct"    => {},
+               "defstruct" => {},
+               "ruleset"   => {},
+               "err"       => "",
+               "errmsg"    => "",
+              };
+   bless $self, $class;
+   _structure_defaults($self);
+   _merge_defaults($self);
 
-  return $self;
+   return $self;
 }
 
 sub version {
@@ -87,42 +101,28 @@ sub version {
    return $VERSION;
 }
 
-sub warnings {
+sub no_structure {
+   my($self) = @_;
+
+   $$self{"structure"} = 0;
+}
+
+sub blank {
    my($self,$val) = @_;
 
-   $$self{"warn"} = $val;
+   $$self{"blank"} = $val;
 }
 
-sub structure {
-   my($self,$val) = @_;
+sub err {
+   my($self) = @_;
 
-   $$self{"structure"} = $val;
+   return $$self{"err"};
 }
 
-sub _warn {
-   my($self,$message,$force) = @_;
-   return  unless ($$self{"warn"}  ||  $force);
-   warn "$message\n";
-}
+sub errmsg {
+   my($self) = @_;
 
-sub ruleset {
-   my($self,$name) = @_;
-   return 3  if ($name eq "keep"     ||
-                 $name eq "replace"  ||
-                 $name eq "default"  ||
-                 $name eq "override"
-                );
-   return 1  if ($name !~ /^[a-zA-Z0-9]+$/);
-   return 2  if (exists $$self{"ruleset"}{$name});
-   $$self{"ruleset"}{$name} = { "def"  => {},
-                                "path" => {} };
-   return 0;
-}
-
-sub ruleset_valid {
-   my($self,$name) = @_;
-   return 1  if (exists $$self{"ruleset"}{$name});
-   return 0;
+   return $$self{"errmsg"};
 }
 
 ###############################################################################
@@ -166,31 +166,107 @@ sub delim {
 }
 
 ###############################################################################
+# RULESET METHODS
+###############################################################################
+
+sub ruleset {
+   my($self,$name) = @_;
+   $$self{"err"}   = "";
+
+   if ($name eq "keep"     ||
+       $name eq "replace"  ||
+       $name eq "default"  ||
+       $name eq "override") {
+      $$self{"err"}    = "ndsrul03";
+      $$self{"errmsg"} = "Unable to create a ruleset using a reserved name " .
+        "[$name]";
+      return;
+   }
+
+   if ($name !~ /^[a-zA-Z0-9]+$/) {
+      $$self{"err"}    = "ndsrul01";
+      $$self{"errmsg"} = "A non-alphanumeric character used in a ruleset name" .
+        "[$name]";
+      return;
+   }
+
+   if (exists $$self{"ruleset"}{$name}) {
+      $$self{"err"}    = "ndsrul02";
+      $$self{"errmsg"} = "Attempt to create ruleset for a name already in use" .
+        " [$name].";
+      return;
+   }
+
+   $$self{"ruleset"}{$name} = { "def"  => {},
+                                "path" => {} };
+   return;
+}
+
+sub ruleset_valid {
+   my($self,$name) = @_;
+   return 1  if (exists $$self{"ruleset"}{$name});
+   return 0;
+}
+
+###############################################################################
 # NDS METHODS
 ###############################################################################
 
+# This takes $nds (which may be an NDS, or the name of a stored NDS)
+# and it returns the actual NDS referred to, or undef if there is a
+# problem.
+#
+# If $new is passed in, new structure is allowed.
+# If $copy is passed in, a copy of the NDS is returned.
+# If $nocheck is passed in, no structural check is done.
+#
+sub _nds {
+   my($self,$nds,$new,$copy,$nocheck) = @_;
+
+   if (! defined($nds)) {
+      return undef;
+
+   } elsif (ref($nds)) {
+      if ($$self{"structure"}  &&  ! $nocheck) {
+         _check_structure($self,$nds,$new,());
+         return undef if ($self->err());
+      }
+      if ($copy) {
+         return dclone($nds);
+      } else {
+         return $nds;
+      }
+
+   } elsif (exists $$self{"nds"}{$nds}) {
+      if ($copy) {
+         return dclone($$self{"nds"}{$nds});
+      } else {
+         return $$self{"nds"}{$nds};
+      }
+   } else {
+      $$self{"err"}    = "ndsnam01";
+      $$self{"errmsg"} = "No NDS stored under the name [$nds]";
+      return undef;
+   }
+}
+
 sub nds {
    my($self,$name,$nds,$new) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
 
    #
    # $obj->nds($name);
+   # $obj->nds($name,"_copy");
    #
 
-   if (! defined $nds) {
+   if (! defined $nds  ||  $nds eq "_copy") {
       if (exists $$self{"nds"}{$name}) {
-         return $$self{"nds"}{$name};
-      } else {
-         return undef;
-      }
-   }
-
-   #
-   # $obj->nds($name,"_delete");
-   #
-
-   if ($nds eq "_copy") {
-      if (exists $$self{"nds"}{$name}) {
-         return dclone($$self{"nds"}{$name});
+         if (defined $nds  &&  $nds eq "_copy") {
+            return dclone($$self{"nds"}{$name});
+         } else {
+            return $$self{"nds"}{$name};
+         }
       } else {
          return undef;
       }
@@ -202,7 +278,16 @@ sub nds {
 
    if ($nds eq "_delete") {
       delete $$self{"nds"}{$name}, return 1
-       if (exists $$self{"nds"}{$name});
+        if (exists $$self{"nds"}{$name});
+      return 0;
+   }
+
+   #
+   # $obj->nds($name,"_exists");
+   #
+
+   if ($nds eq "_exists") {
+      return 1  if (exists $$self{"nds"}{$name});
       return 0;
    }
 
@@ -211,63 +296,61 @@ sub nds {
    # $obj->nds($name,$nds,$new);
    #
 
+   if (exists $$self{"nds"}{$name}) {
+      $$self{"err"}    = "ndsnam02";
+      $$self{"errmsg"} = "Attempt to copy NDS to a name already in use [$name]";
+      return undef;
+   }
+
    if (ref($nds)) {
-      my($err,$val) = $self->check_structure($nds,$new);
-      return ($err)  if ($err);
+      $self->check_structure($nds,$new);
+      return undef if ($self->err());
       $$self{"nds"}{$name} = $nds;
-      return 0;
+      return undef;
 
    } elsif (exists $$self{"nds"}{$nds}) {
       $$self{"nds"}{$name} = dclone($$self{"nds"}{$nds});
-      return 0;
+      return undef;
 
    } else {
-      return -1;
-   }
-}
-
-sub _nds {
-   my($self,$nds,$copy) = @_;
-
-   if (defined $nds  &&  exists $$self{"nds"}{$nds}) {
-      if ($copy) {
-         return dclone($$self{"nds"}{$nds});
-      } else {
-         return $$self{"nds"}{$nds};
-      }
-   } else {
-      if ($copy  &&  ref($nds)) {
-         return dclone($nds);
-      } else {
-         return $nds;
-      }
+      $$self{"err"}    = "ndsnam01";
+      $$self{"errmsg"} = "No NDS stored under the name [$nds]";
+      return undef;
    }
 }
 
 sub empty {
    my($self,$nds) = @_;
-   $nds = _nds($self,$nds);
-   return _empty($nds);
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   return 1  if (! defined $nds);
+
+   $nds = _nds($self,$nds,0,0,1);
+   return undef  if ($self->err());
+
+   return _empty($self,$nds);
 }
 
 sub _empty {
-   my($nds) = @_;
+   my($self,$nds) = @_;
 
    if (! defined $nds) {
       return 1;
 
    } elsif (ref($nds) eq "ARRAY") {
-      return 1  if ($#$nds == -1);
       foreach my $ele (@$nds) {
-         return 0  if (! _empty($ele));
+         return 0  if (! _empty($self,$ele));
       }
       return 1;
 
    } elsif (ref($nds) eq "HASH") {
-      return 1  if (scalar(keys %$nds) == 0);
       foreach my $key (keys %$nds) {
-         return 0  if (! _empty($$nds{$key}));
+         return 0  if (! _empty($self,$$nds{$key}));
       }
+      return 1;
+
+   } elsif ($nds eq "") {
+      return 0  if ($$self{"blank"});
       return 1;
 
    } else {
@@ -276,107 +359,746 @@ sub _empty {
 }
 
 ###############################################################################
-# KEYS, VALUES
+# GET_STRUCTURE
 ###############################################################################
+# Retrieve structural information for a path. Makes use of the default
+# structural information.
 
-sub keys {
-   my($self,$nds,$path) = @_;
-   $nds = _nds($self,$nds);
-   my($valid,$val) = $self->valid($nds,$path);
+sub get_structure {
+   my($self,$path,$info) = @_;
+   $$self{"err"}         = "";
+   $$self{"errmsg"}      = "";
+   $info                 = "type"  if (! defined $info  ||  ! $info);
 
-   return undef  if (! $valid);
+   if (exists $$self{"cache"}{"get_structure"}{$path}  &&
+       exists $$self{"cache"}{"get_structure"}{$path}{$info}) {
+      return $$self{"cache"}{"get_structure"}{$path}{$info};
+   }
 
-   if (! ref($val)) {
-      return ();
+   # Split the path so that we can convert all elements into "*" when
+   # appropriate.
 
-   } elsif (ref($val) eq "ARRAY") {
-      my(@ret);
-      foreach my $i (0..$#$val) {
-         push(@ret,$i)  if (! _empty($$val[$i]));
+   my @path = $self->path($path);
+   my @p    = ();
+   my $p    = "/";
+   if (! exists $$self{"struct"}{$p}) {
+      $$self{"err"}         = "ndschk03";
+      $$self{"errmsg"}      = "No structural information available at all.";
+      return "";
+   }
+
+   while (@path) {
+      my $ele = shift(@path);
+      my $p1  = $self->path([@p,"*"]);
+      my $p2  = $self->path([@p,$ele]);
+      if (exists $$self{"struct"}{$p1}) {
+         push(@p,"*");
+         $p = $p1;
+      } elsif (exists $$self{"struct"}{$p2}) {
+         push(@p,$ele);
+         $p = $p2;
+      } else {
+         return 0  if ($info eq "valid");
+         $$self{"err"}    = "ndschk04";
+         $$self{"errmsg"} = "Invalid path: $p2";
+         return "";
       }
-      return @ret;
+   }
 
-   } elsif (ref($val) eq "HASH") {
-      my(@ret);
-      foreach my $key (sort(CORE::keys %$val)) {
-         push(@ret,$key)  if (! _empty($$val{$key}));
+   # Return the information about the path.
+
+   if ($info eq "valid") {
+      $$self{"cache"}{"get_structure"}{$path}{$info} = 1;
+      return 1;
+   }
+
+   if (exists $$self{"struct"}{$p}{$info}) {
+      my $val = $$self{"struct"}{$p}{$info};
+      $$self{"cache"}{"get_structure"}{$path}{$info} = $val
+        if ( ($info eq "type"  &&  $val =~ /^(hash|list|scalar|other)$/)  ||
+             $info eq "uniform"  ||
+             $info eq "ordered");
+      return $val;
+   }
+
+   if (! exists $$self{"struct"}{$p}{"type"}) {
+      $$self{"err"}    = "ndschk05";
+      $$self{"errmsg"} = "It is not known what type of data is stored at " .
+        "path: $p";
+      return ""
+   }
+
+   my $type = $$self{"struct"}{$p}{"type"};
+
+   if      ($info eq "ordered") {
+      if ($type ne "list") {
+         $$self{"err"}    = "ndschk06";
+         $$self{"errmsg"} = "Ordered information requested for a non-list " .
+           "structure: $p";
+         return "";
       }
-      return @ret;
+      return $$self{"defstruct"}{"ordered"};
+
+   } elsif ($info eq "uniform") {
+      if      ($type eq "hash") {
+         return $$self{"defstruct"}{"uniform_hash"};
+      } elsif ($type eq "list") {
+         my $ordered = $self->get_structure($p,"ordered");
+         if ($ordered) {
+            return $$self{"defstruct"}{"uniform_ol"};
+         } else {
+            return 1;
+         }
+
+      } else {
+         $$self{"err"}    = "ndschk07";
+         $$self{"errmsg"} = "Uniform information requested for a scalar " .
+           "structure: $p";
+         return "";
+      }
+
+   } elsif ($info eq "merge") {
+      if ($type eq "list") {
+         my $ordered = $self->get_structure($p,"ordered");
+         if ($ordered) {
+            return $$self{"defstruct"}{"merge_ol"};
+         } else {
+            return $$self{"defstruct"}{"merge_ul"};
+         }
+
+      } elsif ($type eq "hash") {
+         return $$self{"defstruct"}{"merge_hash"};
+
+      } else {
+         return $$self{"defstruct"}{"merge_scalar"};
+      }
+
+   } elsif ($info eq "keys") {
+      if ($type ne "hash") {
+         $$self{"err"}    = "ndschk08";
+         $$self{"errmsg"} = "Keys requested for a non-hash structure: $p";
+         return "";
+      }
+
+      if (exists $$self{"struct"}{$p}{"uniform"}  &&
+          $$self{"struct"}{$p}{"uniform"}) {
+         $$self{"err"}    = "ndschk09";
+         $$self{"errmsg"} = "Keys requested for a uniform hash structure: $p";
+         return "";
+      }
+
+      my @keys = ();
+    PP: foreach my $pp (CORE::keys %{ $$self{"struct"} }) {
+         # Look for paths of the form: $p/KEY
+         my @pp = $self->path($pp);
+         next  if ($#pp != $#p + 1);
+         my $key = pop(@pp);
+         my $tmp = $self->path(\@pp);
+         next  if ($tmp ne $p);
+         push(@keys,$key);
+      }
+      return sort @keys;
 
    } else {
-      return undef;
+      $$self{"err"}    = "ndschk99";
+      $$self{"errmsg"} = "Unknown structural information requested: $info";
+      return "";
    }
 }
 
-sub values {
-   my($self,$nds,$path) = @_;
-   $nds = _nds($self,$nds);
-   my($valid,$val) = $self->valid($nds,$path);
+###############################################################################
+# SET_STRUCTURE
+###############################################################################
+# This sets a piece of structural information (and does all error checking
+# on it).
 
-   return undef  if (! $valid);
+sub set_structure {
+   my($self,$item,$val,$path) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
 
-   if (! ref($val)) {
-      return ($val);
-
-   } elsif (ref($val) eq "ARRAY") {
-      my(@ret);
-      foreach my $i (0..$#$val) {
-         push(@ret,$$val[$i])  if (! _empty($$val[$i]));
-      }
-      return @ret;
-
-   } elsif (ref($val) eq "HASH") {
-      my(@ret);
-      foreach my $key (sort(CORE::keys %$val)) {
-         push(@ret,$$val{$key})  if (! _empty($$val{$key}));
-      }
-      return @ret;
-
+   if ($path) {
+      _set_structure_path($self,$item,$val,$path);
    } else {
-      return undef;
+      _set_structure_default($self,$item,$val);
    }
+}
+
+# Set a structural item for a path.
+#
+sub _set_structure_path {
+   my($self,$item,$val,$path) = @_;
+
+   my @path = $self->path($path);
+   $path    = $self->path(\@path);
+   _structure_valid($self,$item,$val,$path,@path);
+}
+
+# Rules for a valid structure:
+#
+# If parent is not valid
+#    INVALID
+# End
+#
+# If we're not setting an item
+#    VALID
+# End
+#
+# If type is not set
+#    set it to unknown
+# End
+#
+# INVALID  if incompatible with any other options already set
+# INVALID  if path incompatible with type
+# INVALID  if path incompatible with parent
+# INVALID  if any direct childres incompatible
+#
+# Set item
+#
+sub _structure_valid {
+   my($self,$item,$val,$path,@path) = @_;
+
+   #
+   # Check for an invalid parent
+   #
+
+   my (@parent,$parent);
+   if (@path) {
+      @parent = @path;
+      pop(@parent);
+      $parent = $self->path([@parent]);
+      _structure_valid($self,"","",$parent,@parent);
+      return  if ($self->err());
+   }
+
+   #
+   # If we're not setting a value, then the most we've done is
+   # set defaults (which we know we've done correct), so it's valid
+   # to the extent that we're able to check.
+   #
+
+   return  unless ($item);
+
+   #
+   # Make sure type is set. If it's not, set it to "unknown".
+   #
+
+   $$self{"struct"}{$path}{"type"} = "unknown"
+     if (! exists $$self{"struct"}{$path}{"type"});
+   my $type = $$self{"struct"}{$path}{"type"};
+
+   #
+   # Check to make sure that $item and $val are valid and that
+   # they don't conflict with other structural settings for
+   # this path.
+   #
+
+   my $set_ordered    = 0;
+   my $set_uniform    = 0;
+   my $valid          = 0;
+
+   # Type checks
+   if ($item eq "type") {
+      $valid = 1;
+      if ($val ne "scalar"  &&
+          $val ne "list"    &&
+          $val ne "hash"    &&
+          $val ne "other") {
+         $$self{"err"}    = "ndsstr01";
+         $$self{"errmsg"} = "Attempt to set type to an invalid value: $val";
+         return;
+      }
+      if ($type ne "unknown"  &&
+          $type ne "list/hash") {
+         $$self{"err"}    = "ndsstr02";
+         $$self{"errmsg"} = "Once type is set, it may not be reset: $path";
+         return;
+      }
+      if ($type eq "list/hash"  &&
+          $val ne "list"        &&
+          $val ne "hash") {
+         $$self{"err"}    = "ndsstr03";
+         $$self{"errmsg"} = "Attempt to set type to scalar when a list/hash " .
+           "type is required: $path";
+         return;
+      }
+   }
+
+   # Ordered checks
+   if ($item eq "ordered") {
+      $valid = 1;
+      if (exists $$self{"struct"}{$path}{"ordered"}) {
+         $$self{"err"}    = "ndsstr04";
+         $$self{"errmsg"} = "Attempt to reset ordered: $path";
+         return;
+      }
+
+      # only allowed for lists
+      if ($type eq "unknown"  ||
+          $type eq "list/hash") {
+         _structure_valid($self,"type","list",$path,@path);
+         return  if ($self->err());
+         $type = "list";
+      }
+      if ($type ne "list") {
+         $$self{"err"}    = "ndsstr05";
+         $$self{"errmsg"} = "Attempt to set ordered on a non-list structure: " .
+           "$path";
+         return;
+      }
+      if ($val ne "0"  &&
+          $val ne "1") {
+         $$self{"err"}    = "ndsstr06";
+         $$self{"errmsg"} = "Ordered value must be 0 or 1: $path";
+         return;
+      }
+
+      # check conflicts with "uniform"
+      if (! exists $$self{"struct"}{$path}{"uniform"}) {
+         if ($val) {
+            # We're making an unknown list ordered. This can
+            # apply to uniform or non-uniform lists, so nothing
+            # is required.
+         } else {
+            # We're making an unknown list unordered. The
+            # list must be uniform.
+            $set_uniform = 1;
+         }
+      } elsif ($$self{"struct"}{$path}{"uniform"}) {
+         # We're making an uniform list ordered or non-ordered.
+         # Both are allowed.
+      } else {
+         if ($val) {
+            # We're making an non-uniform list ordered. This is
+            # allowed.
+         } else {
+            # We're trying to make an non-uniform list unordered.
+            # This is NOT allowed.
+
+            # NOTE: This will never occur. Any time we set a list to
+            # non-uniform, it will automatically set the ordered flag
+            # appropriately, so trying to set it here will result in an
+            # ndsstr04 error.
+            return;
+         }
+      }
+   }
+
+   # Uniform checks
+   if ($item eq "uniform") {
+      $valid = 1;
+      if (exists $$self{"struct"}{$path}{"uniform"}) {
+         $$self{"err"}    = "ndsstr07";
+         $$self{"errmsg"} = "Attempt to reset uniform: $path";
+         return;
+      }
+
+      # only applies to lists and hashes
+      if ($type eq "unknown") {
+         _structure_valid($self,"type","list/hash",$path,@path);
+         return  if ($self->err());
+      }
+      if ($type ne "list"  &&
+          $type ne "hash"   &&
+          $type ne "list/hash") {
+         $$self{"err"}    = "ndsstr08";
+         $$self{"errmsg"} = "Attempt to set uniform on a scalar structure: " .
+           "$path";
+         return;
+      }
+      if ($val ne "0"  &&
+          $val ne "1") {
+         $$self{"err"}    = "ndsstr09";
+         $$self{"errmsg"} = "Uniform value must be 0 or 1: $path";
+         return;
+      }
+
+      # check conflicts with "ordered"
+      if (exists $$self{"struct"}{$path}{"type"}  &&
+          $$self{"struct"}{$path}{"type"} eq "list") {
+         if (! exists $$self{"struct"}{$path}{"ordered"}) {
+            if ($val) {
+               # We're making an unknown list uniform. This can
+               # apply to ordered or unorderd lists, so nothing
+               # is required.
+            } else {
+               # We're making an unknown list non-uniform. The
+               # list must be ordered.
+               $set_ordered = 1;
+            }
+         } elsif ($$self{"struct"}{$path}{"ordered"}) {
+            # We're making an ordered list uniform or non-uniform.
+            # Both are allowed.
+         } else {
+            if ($val) {
+               # We're making an unordered list uniform. This is
+               # allowed.
+            } else {
+               # We're trying to make an unordered list non-uniform.
+               # This is NOT allowed.
+
+               # NOTE: This error will never occur. Any time we set a
+               # list to unordered, it will automatically set the
+               # uniform flag appropriately, so trying to set it here
+               # will result in a ndsstr07 error.
+               return;
+            }
+         }
+      }
+   }
+
+   # $item is invalid
+   if (! $valid) {
+      $$self{"err"}    = "ndsstr98";
+      $$self{"errmsg"} = "Invalid default structural item: $item";
+      return;
+   }
+
+   #
+   # Check to make sure that the current path is valid with
+   # respect to the type of structure we're currently in (this
+   # is defined in the parent element).
+   #
+
+   if (@path) {
+      my $curr_ele    = $path[$#path];
+      if (exists $$self{"struct"}{$parent}{"type"}) {
+         my $parent_type = $$self{"struct"}{$parent}{"type"};
+
+         if ($parent_type eq "unknown") {
+            _structure_valid($self,"type","list/hash",$parent,@parent);
+            return  if ($self->err());
+         }
+
+         if ($parent_type eq "scalar"  ||
+             $parent_type eq "other") {
+            $$self{"err"}    = "ndsstr10";
+            $$self{"errmsg"} = "Trying to set structural information for a " .
+              "child with a scalar parent: $path";
+            return;
+
+         } elsif ($parent_type eq "list"  &&
+             $curr_ele =~ /^\d+$/) {
+            if (exists $$self{"struct"}{$parent}{"uniform"}) {
+               if ($$self{"struct"}{$parent}{"uniform"}) {
+                  # Parent = list,uniform  Curr = 2
+                  $$self{"err"}    = "ndsstr11";
+                  $$self{"errmsg"} = "Attempt to set structural information " .
+                    "for a specific element in a uniform list: $path";
+                  return;
+               }
+            } else {
+               # Parent = list, unknown  Curr = 2
+               #    => force parent to be non-uniform
+               _structure_valid($self,"uniform","0",$parent,@parent);
+               return  if ($self->err());
+            }
+
+         } elsif ($parent_type eq "list"  &&
+                  $curr_ele eq "*") {
+            if (exists $$self{"struct"}{$parent}{"uniform"}) {
+               if (! $$self{"struct"}{$parent}{"uniform"}) {
+                  # Parent = list,nonuniform  Curr = *
+                  $$self{"err"}    = "ndsstr12";
+                  $$self{"errmsg"} = "Attempt to set structural information " .
+                    "for all elements in a non-uniform list: $path";
+                  return;
+               }
+            } else {
+               # Parent = list,unknown  Curr = *
+               #    => force parent to be uniform
+               _structure_valid($self,"uniform","1",$parent,@parent);
+               return  if ($self->err());
+            }
+
+         } elsif ($parent_type eq "list") {
+            $$self{"err"}    = "ndsstr13";
+            $$self{"errmsg"} = "Attempt to access a list with a non-integer " .
+              "index.: $path";
+            return;
+
+         } elsif (($parent_type eq "hash"  ||  $parent_type eq "list/hash")  &&
+                  $curr_ele eq "*") {
+            if (exists $$self{"struct"}{$parent}{"uniform"}) {
+               if (! $$self{"struct"}{$parent}{"uniform"}) {
+                  # Parent = list/hash,non-uniform  Curr = *
+                  $$self{"err"}    = "ndsstr15";
+                  $$self{"errmsg"} = "Attempt to set structural information " .
+                    "for all elements in a non-uniform structure: $path";
+                  return;
+               }
+            } else {
+               # Parent = hash,unknown  Curr = *
+               #    => force parent to be uniform
+               _structure_valid($self,"uniform","1",$parent,@parent);
+               return  if ($self->err());
+            }
+
+         } elsif ($parent_type eq "hash"  ||  $parent_type eq "list/hash") {
+            if (exists $$self{"struct"}{$parent}{"uniform"}) {
+               if ($$self{"struct"}{$parent}{"uniform"}) {
+                  # Parent = list/hash,uniform  Curr = foo
+                  $$self{"err"}    = "ndsstr14";
+                  $$self{"errmsg"} = "Attempt to set structural information " .
+                    "for a specific element in a uniform structure: $path";
+                  return;
+               }
+            } else {
+               # Parent = hash,unknown  Curr = foo
+               #    => force parent to be non-uniform
+               _structure_valid($self,"uniform","0",$parent,@parent);
+               return  if ($self->err());
+            }
+         }
+
+      } else {
+         # Parent is not type'd yet.
+
+         if ($curr_ele eq "*"  ||
+             $curr_ele =~ /^\d+$/) {
+            _structure_valid($self,"type","list/hash",$parent,@parent);
+            return  if ($self->err());
+         } else {
+            _structure_valid($self,"type","hash",$parent,@parent);
+            return  if ($self->err());
+         }
+      }
+   }
+
+   #
+   # Set the item
+   #
+
+   $$self{"struct"}{$path}{$item} = $val;
+   if ($set_ordered) {
+      _structure_valid($self,"ordered","1",$path,@path);
+      return  if ($self->err());
+   }
+   if ($set_uniform) {
+      _structure_valid($self,"uniform","1",$path,@path);
+      return  if ($self->err());
+   }
+}
+
+{
+   # Values for the default structural information. First value in the
+   # list is the error code for this item. Second value is the default
+   # for this item.
+
+   my %def = ( "ordered"        => [ "ndsstr16",
+                                     "Attempt to set the default ordered " .
+                                     "value to something other than 0/1",
+                                     qw(0 1) ],
+               "uniform_hash"   => [ "ndsstr17",
+                                     "Attempt to set the default uniform_hash" .
+                                     " value to something other than 0/1",
+                                     qw(0 1) ],
+               "uniform_ol"     => [ "ndsstr18",
+                                     "Attempt to set the default uniform_ol " .
+                                     "value to something other than 0/1",
+                                     qw(1 0) ],
+             );
+
+   sub _set_structure_default {
+      my($self,$item,$val) = @_;
+
+      if (! exists $def{$item}) {
+         $$self{"err"}    = "ndsstr99";
+         $$self{"errmsg"} = "Invalid structural item for a path: $item";
+         return;
+      }
+      my @tmp = @{ $def{$item} };
+      my $err = shift(@tmp);
+      my $msg = shift(@tmp);
+      my %tmp = map { $_,1 } @tmp;
+      if (! exists $tmp{$val}) {
+         $$self{"err"} = $err;
+         $$self{"errmsg"} = "$msg: $item = $val";
+         return;
+      }
+      $$self{"defstruct"}{$item} = $val;
+      return;
+   }
+
+   # Set up the default structure:
+   sub _structure_defaults {
+      my($self) = @_;
+      my($d) = "defstruct";
+
+      $$self{$d} = {}  if (! exists $$self{$d});
+      foreach my $key (CORE::keys %def) {
+         $$self{$d}{$key} = $def{$key}[2];
+      }
+   }
+}
+
+###############################################################################
+# CHECK_STRUCTURE/CHECK_VALUE
+###############################################################################
+# This checks the structure of an NDS (and may update the structural
+# information if appropriate).
+
+sub check_structure {
+   my($self,$nds,$new) = @_;
+   $$self{"err"}       = "";
+   $$self{"errmsg"}    = "";
+
+   return  if (! ref($nds));
+   return  if (! $$self{"structure"});
+
+   $new = 0  if (! $new);
+
+   _check_structure($self,$nds,$new,());
+}
+
+sub check_value {
+   my($self,$path,$val,$new) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   my(@path) = $self->path($path);
+   _check_structure($self,$val,$new,@path);
+}
+
+sub _check_structure {
+   my($self,$nds,$new,@path) = @_;
+   return  if (! defined $nds);
+
+   my $path = $self->path([@path]);
+
+   # Check to make sure that it's the correct type of data.
+
+   my $type = $self->get_structure($path,"type");
+
+   if ($type) {
+      my $ref = lc(ref($nds));
+      $ref    = "scalar"  if (! $ref);
+      $ref    = "list"    if ($ref eq "array");
+
+      if      ($type eq "hash"  ||  $type eq "list"  ||  $type eq "scalar") {
+         if ($ref ne $type) {
+            $$self{"err"}    = "ndschk01";
+            $$self{"errmsg"} = "Invalid type: $path (expected $type, got $ref)";
+            return;
+         }
+
+      } elsif ($type eq "list/hash") {
+         if ($ref ne "list"  &&  $ref ne "hash") {
+            $$self{"err"}    = "ndschk01";
+            $$self{"errmsg"} = "Invalid type: $path (expected $type, got $ref)";
+            return;
+         }
+         $type = "";
+
+      } elsif ($type eq "other") {
+         if ($ref eq "scalar"  ||
+             $ref eq "hash"    ||
+             $ref eq "list") {
+            $$self{"err"}    = "ndschk01";
+            $$self{"errmsg"} = "Invalid type: $path (expected $type, got $ref)";
+            return;
+         }
+
+      } elsif ($type eq "unknown") {
+         $type = "";
+
+      } else {
+         die "[check_structure] Impossible error: $type";
+      }
+   }
+
+   if (! $type) {
+      # If the structure is not previously defined, it will set an
+      # error code. Erase that one (it's not interesting) and then
+      # set the structure based on the new value (if allowed).
+      $$self{"err"}    = "";
+      $$self{"errmsg"} = "";
+      if ($new) {
+         $type = lc(ref($nds));
+         $type = "list"  if ($type eq "array");
+         if (! $type) {
+            _set_structure_path($self,"type","scalar",$path);
+         } elsif ($type eq "hash"  ||
+                  $type eq "list") {
+            _set_structure_path($self,"type",$type,$path);
+         } else {
+            _set_structure_path($self,"type","other",$path);
+         }
+
+      } else {
+         $$self{"err"}    = "ndschk02";
+         $$self{"errmsg"} = "New structure not allowed";
+         return;
+      }
+   }
+
+   return  unless ($type eq "list"  ||  $type eq "hash");
+
+   # Recurse into hashes.
+
+   my $uniform = $self->get_structure($path,"uniform");
+   if ($type eq "hash") {
+      foreach my $key (CORE::keys %$nds) {
+         my $val = $$nds{$key};
+         if ($uniform) {
+            _check_structure($self,$val,$new,@path,"*");
+            return  if ($self->err());
+         } else {
+            _check_structure($self,$val,$new,@path,$key);
+            return  if ($self->err());
+         }
+      }
+      return;
+   }
+
+   # Recurse into lists
+
+   for (my $i=0; $i<=$#$nds; $i++) {
+      my $val = $$nds[$i];
+      if ($uniform) {
+         _check_structure($self,$val,$new,@path,"*");
+         return  if ($self->err());
+      } else {
+         _check_structure($self,$val,$new,@path,$i);
+         return  if ($self->err());
+      }
+   }
+
+   return;
 }
 
 ###############################################################################
 # VALID/VALUE
 ###############################################################################
-# Checks to see if a path is valid in an NDS
 
-sub valid {
+sub value {
    my($self,$nds,$path,$copy) = @_;
-   $nds = _nds($self,$nds);
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   $nds = _nds($self,$nds,1,0,0);
+   return undef  if ($self->err());
+
    my($delim) = $self->delim();
    my @path   = $self->path($path);
 
-   if (! ref($nds)) {
-      return (0,-1);
-   }
+   my $val    = _value($self,$nds,$delim,"",@path);
+   return undef  if ($self->err());
 
-   my($valid,$val,$where) = _valid($nds,$delim,"",@path);
-   if ($copy  &&  $valid) {
-      return($valid,dclone($val));
-   } elsif ($valid) {
-      return($valid,$val);
+   if ($copy  &&  ref($val)) {
+      return dclone($val);
    } else {
-      return($valid,$val,$where);
+      return $val;
    }
 }
 
-sub value {
-   my($valid,$val) = valid(@_);
-   return undef  if (! $valid);
-   return $val;
-}
-
-sub _valid {
-   my($nds,$delim,$path,@path) = @_;
+sub _value {
+   my($self,$nds,$delim,$path,@path) = @_;
 
    #
    # We've traversed as far as @path goes
    #
 
    if (! @path) {
-      return (1,$nds);
+      return $nds;
    }
 
    #
@@ -393,15 +1115,23 @@ sub _valid {
 
    if      (! defined($nds)) {
       # $nds doesn't contain the path
-      return (0,0,$path);
+      $$self{"err"}    = "ndsdat01";
+      $$self{"errmsg"} = "A path does not exist in the NDS: $path";
+      return undef;
 
    } elsif (! ref($nds)) {
       # $nds is a scalar
-      return (0,10,$path);
+      $$self{"err"}    = "ndsdat04";
+      $$self{"errmsg"} = "The NDS has a scalar at a point where a hash or " .
+        "list should be: $path";
+      return undef;
 
    } elsif (ref($nds) ne "HASH"  &&  ref($nds) ne "ARRAY") {
       # $nds is an unsupported data type
-      return (0,11,$path);
+      $$self{"err"}    = "ndsdat05";
+      $$self{"errmsg"} = "The NDS has a reference to an unsupported data " .
+        "type where a hash or list should be: $path";
+      return undef;
    }
 
    #
@@ -410,9 +1140,11 @@ sub _valid {
 
    if      (ref($nds) eq "HASH") {
       if (exists $$nds{$p}) {
-         return _valid($$nds{$p},$delim,$path,@path);
+         return _value($self,$$nds{$p},$delim,$path,@path);
       } else {
-         return (0,1,$path);
+         $$self{"err"}    = "ndsdat02";
+         $$self{"errmsg"} = "A hash key does not exist in the NDS: $path";
+         return undef;
       }
    }
 
@@ -421,11 +1153,345 @@ sub _valid {
    #
 
    if ($p !~ /^\d+$/) {
-      return (0,12,$path);
-   } elsif (defined $$nds[$p]) {
-      return _valid($$nds[$p],$delim,$path,@path);
+      # A non-integer list reference
+      $$self{"err"}    = "ndsdat06";
+      $$self{"errmsg"} = "A non-integer index used to access a list: $path";
+      return undef;
+   } elsif ($#$nds < $p) {
+      $$self{"err"}    = "ndsdat03";
+      $$self{"errmsg"} = "A list element does not exist in the NDS: $path";
+      return undef;
    } else {
-      return (0,2,$path);
+      return _value($self,$$nds[$p],$delim,$path,@path);
+   }
+}
+
+###############################################################################
+# KEYS, VALUES
+###############################################################################
+
+sub keys {
+   my($self,$nds,$path) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   $nds = _nds($self,$nds,1,0,0);
+   my $val = $self->value($nds,$path);
+   return undef  if ($self->err());
+
+   if (! ref($val)) {
+      return ();
+
+   } elsif (ref($val) eq "ARRAY") {
+      my(@ret);
+      foreach my $i (0..$#$val) {
+         push(@ret,$i)  if (! _empty($self,$$val[$i]));
+      }
+      return @ret;
+
+   } elsif (ref($val) eq "HASH") {
+      my(@ret);
+      foreach my $key (sort(CORE::keys %$val)) {
+         push(@ret,$key)  if (! _empty($self,$$val{$key}));
+      }
+      return @ret;
+
+   } else {
+      return undef;
+   }
+}
+
+sub values {
+   my($self,$nds,$path) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   $nds = _nds($self,$nds,1,0,0);
+   my $val = $self->value($nds,$path);
+   return undef  if ($self->err());
+
+   if (! ref($val)) {
+      return ($val);
+
+   } elsif (ref($val) eq "ARRAY") {
+      my(@ret);
+      foreach my $i (0..$#$val) {
+         push(@ret,$$val[$i])  if (! _empty($self,$$val[$i]));
+      }
+      return @ret;
+
+   } elsif (ref($val) eq "HASH") {
+      my(@ret);
+      foreach my $key (sort(CORE::keys %$val)) {
+         push(@ret,$$val{$key})  if (! _empty($self,$$val{$key}));
+      }
+      return @ret;
+
+   } else {
+      return undef;
+   }
+}
+
+###############################################################################
+# SET_MERGE
+###############################################################################
+
+sub set_merge {
+   my($self,$item,$val,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+
+   if (_merge_default($self,$item)) {
+      _set_merge_default($self,$item,$val,@args);
+
+   } elsif ($item eq "merge") {
+      _set_merge_path($self,$val,@args);
+
+   } else {
+      $$self{"err"}    = "ndsmer01";
+      $$self{"errmsg"} = "Attempt to set a merge setting to an unknown " .
+        "value: $item";
+      return;
+   }
+}
+
+# Set a merge item for a path.
+#
+sub _set_merge_path {
+   my($self,$path,$method,$ruleset) = @_;
+   $ruleset = "*"  if (! $ruleset);
+
+   my @path = $self->path($path);
+   $path    = $self->path(\@path);
+
+   if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path}) {
+      $$self{"err"}    = "ndsmer06";
+      $$self{"errmsg"} = "Attempt to reset merge value for a path: $path";
+      return;
+   }
+
+   # Check type vs. method
+
+   my $type = $self->get_structure($path,"type");
+
+   if      ($type eq "list") {
+      my $ordered = $self->get_structure($path,"ordered");
+
+      if (! _merge_allowed($type,$ordered,$method)) {
+         if ($ordered) {
+            $$self{"err"}    = "ndsmer08";
+            $$self{"errmsg"} = "Invalid merge method for ordered list " .
+              "merging: $path";
+            return;
+         } else {
+            $$self{"err"}    = "ndsmer09";
+            $$self{"errmsg"} = "Invalid merge method for unordered list " .
+              "merging: $path";
+            return;
+         }
+      }
+
+   } elsif ($type eq "hash") {
+      if (! _merge_allowed($type,0,$method)) {
+         $$self{"err"}    = "ndsmer10";
+         $$self{"errmsg"} = "Invalid merge method for hash merging: $path";
+         return;
+      }
+
+   } elsif ($type eq "scalar"  ||  $type eq "other") {
+      if (! _merge_allowed($type,0,$method)) {
+         $$self{"err"}    = "ndsmer11";
+         $$self{"errmsg"} = "Invalid merge method for scalar merging: $path";
+         return;
+      }
+
+   } else {
+      $$self{"err"}    = "ndsmer07";
+      $$self{"errmsg"} = "Attempt to set merge for a path with no " .
+        "known type: $path";
+      return;
+   }
+
+   # Set the method
+
+   $$self{"ruleset"}{$ruleset}{"path"}{$path} = $method;
+   return;
+}
+
+{
+   # Values for the default structural information. First value in the
+   # list is the error code for this item. Second value is the default
+   # for this item.
+
+   my %def = ( "merge_hash"     => [ "ndsmer02",
+                                     "Attempt to set merge_hash to an " .
+                                     "invalid value",
+                                     qw(merge
+                                        keep keep_warn
+                                        replace replace_warn
+                                        error) ],
+               "merge_ol"       => [ "ndsmer03",
+                                     "Attempt to set merge_ol to an invalid " .
+                                     "value",
+                                     qw(merge
+                                        keep keep_warn
+                                        replace replace_warn
+                                        error) ],
+               "merge_ul"       => [ "ndsmer04",
+                                     "Attempt to set merge_ul to an invalid " .
+                                     "value",
+                                     qw(append
+                                        keep keep_warn
+                                        replace replace_warn
+                                        error) ],
+               "merge_scalar"   => [ "ndsmer05",
+                                     "Attempt to set merge_scalar to an " .
+                                     "invalid value",
+                                     qw(keep keep_warn
+                                        replace replace_warn
+                                        error) ],
+             );
+
+   sub _merge_default {
+      my($self,$item) = @_;
+      return 1  if (exists $def{$item});
+      return 0;
+   }
+
+   sub _set_merge_default {
+      my($self,$item,$val,$ruleset) = @_;
+      $ruleset = "*"  if (! $ruleset);
+
+      my @tmp = @{ $def{$item} };
+      my $err = shift(@tmp);
+      my $msg = shift(@tmp);
+      my %tmp = map { $_,1 } @tmp;
+      if (! exists $tmp{$val}) {
+         $$self{"err"}    = $err;
+         $$self{"errmsg"} = "$msg: $item = $val";
+         return;
+      }
+      $$self{"ruleset"}{$ruleset}{"def"}{$item} = $val;
+      return;
+   }
+
+   # Set up the default merge:
+   sub _merge_defaults {
+      my($self) = @_;
+
+      foreach my $key (CORE::keys %def) {
+         $$self{"ruleset"}{"*"}{"def"}{$key} = $def{$key}[2];
+      }
+
+      $$self{"ruleset"}{"keep"}{"def"} =
+        { "merge_hash"   => "keep",
+          "merge_ol"     => "keep",
+          "merge_ul"     => "keep",
+          "merge_scalar" => "keep" };
+
+      $$self{"ruleset"}{"replace"}{"def"} =
+        { "merge_hash"   => "replace",
+          "merge_ol"     => "replace",
+          "merge_ul"     => "replace",
+          "merge_scalar" => "replace" };
+
+      $$self{"ruleset"}{"default"}{"def"} =
+        { "merge_hash"   => "merge",
+          "merge_ol"     => "merge",
+          "merge_ul"     => "keep",
+          "merge_scalar" => "keep" };
+
+      $$self{"ruleset"}{"override"}{"def"} =
+        { "merge_hash"   => "merge",
+          "merge_ol"     => "merge",
+          "merge_ul"     => "replace",
+          "merge_scalar" => "replace" };
+
+   }
+
+   sub _merge_allowed {
+      my($type,$ordered,$val) = @_;
+
+      my @tmp;
+      if ($type eq "hash") {
+         @tmp = @{ $def{"merge_hash"} };
+      } elsif ($type eq "list") {
+         if ($ordered) {
+            @tmp = @{ $def{"merge_ol"} };
+         } else {
+            @tmp = @{ $def{"merge_ul"} };
+         }
+      } else {
+         @tmp = @{ $def{"merge_scalar"} };
+      }
+
+      my $err = shift(@tmp);
+      my $msg = shift(@tmp);
+      my %tmp = map { $_,1 } @tmp;
+      return 0  if (! exists $tmp{$val});
+      return 1;
+   }
+}
+
+###############################################################################
+# GET_MERGE
+###############################################################################
+
+sub get_merge {
+   my($self,$path,$ruleset) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   $ruleset = "*"  if (! $ruleset);
+   my @path = $self->path($path);
+   $path    = $self->path(\@path);
+
+   # Check ruleset
+
+   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
+     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
+
+   my $type    = $self->get_structure($path,"type");
+   my $ordered;
+   if ($type eq "list") {
+      $ordered = $self->get_structure($path,"ordered");
+   }
+
+   if ($type eq "hash") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"});
+
+   } elsif ($type eq "list"  &&  $ordered) {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"});
+
+   } elsif ($type eq "list") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"});
+
+   } elsif ($type eq "scalar"  ||  $type eq "other") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"}
+        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"});
+
+   } else {
+      return "";
+   }
+
+   # Check "*" (this should always find something)
+
+   $ruleset = "*";
+
+   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
+     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
+
+   if ($type eq "hash") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"};
+
+   } elsif ($type eq "list"  &&  $ordered) {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"};
+
+   } elsif ($type eq "list") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"};
+
+   } elsif ($type eq "scalar"  ||  $type eq "other") {
+      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"};
    }
 }
 
@@ -436,23 +1502,9 @@ sub _valid {
 
 sub merge {
    my($self,$nds1,$nds2,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
    return  if (! defined $nds2);
-
-   #
-   # Get nds1 and nds2 by reference or name
-   #
-
-   $nds1 = _nds($self,$nds1);
-   if (! defined($nds1)) {
-      _warn($self,"[merge] NDS1 undefined: $nds1");
-      return 1;
-   }
-
-   $nds2 = _nds($self,$nds2,1);
-   if (! defined($nds2)) {
-      _warn($self,"[merge] NDS2 undefined: $nds2");
-      return 1;
-   }
 
    #
    # Parse ruleset and new arguments
@@ -481,13 +1533,39 @@ sub merge {
    }
 
    #
+   # Get nds1 and nds2 by reference or name
+   #
+
+   $nds1 = _nds($self,$nds1,$new);
+   if (! defined($nds1)) {
+      $$self{"err"}    = "ndsmer12";
+      $$self{"errmsg"} = "While merging, the first NDS is not defined: $nds1";
+      return;
+   }
+
+   $nds2 = _nds($self,$nds2,$new);
+   if (! defined($nds2)) {
+      $$self{"err"}    = "ndsmer13";
+      $$self{"errmsg"} = "While merging, the second NDS is not defined: $nds2";
+      return;
+   }
+
+   #
    # Check structure
    #
 
-   my ($err,$val) = $self->check_structure($nds1,$new);
-   return 3  if ($err);
-   ($err,$val) = $self->check_structure($nds2,$new);
-   return 4  if ($err);
+   $self->check_structure($nds1,$new);
+   if ($$self{"err"}) {
+      $$self{"err"}    = "ndsmer14";
+      $$self{"errmsg"} = "The first NDS has an invalid structure.";
+      return;
+   }
+   $self->check_structure($nds2,$new);
+   if ($$self{"err"}) {
+      $$self{"err"}    = "ndsmer15";
+      $$self{"errmsg"} = "The second NDS has an invalid structure.";
+      return;
+   }
 
    #
    # Merge
@@ -499,9 +1577,11 @@ sub merge {
    } elsif (ref($nds1) eq "ARRAY") {
       @$nds1 = @$tmp;
    } else {
-      return 5;
+      $$self{"err"}    = "ndsmer16";
+      $$self{"errmsg"} = "The NDS must be a list or hash.";
+      return;
    }
-   return 0;
+   return;
 }
 
 sub _merge {
@@ -530,12 +1610,12 @@ sub _merge {
    my $method = $self->get_merge($path,$ruleset);
 
    if      ($method eq "keep"  ||  $method eq "keep_warn") {
-      _warn($self,"[merge] keeping initial value\n" .
+      warn($self,"[merge] keeping initial value\n" .
                   "        path: $path",1)  if ($method eq "keep_warn");
       return $nds1;
 
    } elsif ($method eq "replace"  ||  $method eq "replace_warn") {
-      _warn($self,"[merge] replacing initial value\n" .
+      warn($self,"[merge] replacing initial value\n" .
                   "        path: $path",1)  if ($method eq "replace_warn");
       if (ref($nds2)) {
          return $nds2;
@@ -544,13 +1624,13 @@ sub _merge {
 
    } elsif ($method eq "error") {
       if (ref($nds1)) {
-         _warn($self,"[merge] multiply defined value\n" .
+         warn($self,"[merge] multiply defined value\n" .
                      "        path: $path",1);
          exit;
       } elsif ($nds1 eq $nds2) {
          return $nds1;
       } else {
-         _warn($self,"[merge] nonidentical values\n" .
+         warn($self,"[merge] nonidentical values\n" .
                      "        path: $path",1);
          exit;
       }
@@ -641,881 +1721,18 @@ sub _merge_lists {
 }
 
 ###############################################################################
-# SET_STRUCTURE
-###############################################################################
-# This sets a piece of structural information (and does all error checking
-# on it).
-
-sub set_structure {
-   my($self,$item,$val,$path) = @_;
-
-   if ($path) {
-      return _set_structure_path($self,$item,$val,$path);
-   } else {
-      return _set_structure_default($self,$item,$val);
-   }
-}
-
-# Set a structural item for a path.
-#
-sub _set_structure_path {
-   my($self,$item,$val,$path) = @_;
-
-   my @path = $self->path($path);
-   $path    = $self->path(\@path);
-   return _structure_valid($self,$item,$val,$path,@path);
-}
-
-# Rules for a valid structure:
-#
-# If parent is not valid
-#    INVALID
-# End
-#
-# If we're not setting an item
-#    VALID
-# End
-#
-# If type is not set
-#    set it to unknown
-# End
-#
-# INVALID  if incompatible with any other options already set
-# INVALID  if path incompatible with type
-# INVALID  if path incompatible with parent
-# INVALID  if any direct childres incompatible
-#
-# Set item
-#
-sub _structure_valid {
-   my($self,$item,$val,$path,@path) = @_;
-
-   #
-   # Check for an invalid parent
-   #
-
-   my (@parent,$parent);
-   if (@path) {
-      @parent = @path;
-      pop(@parent);
-      $parent = $self->path([@parent]);
-      my $err = _structure_valid($self,"","",$parent,@parent);
-      return $err  if ($err);
-   }
-
-   #
-   # If we're not setting a value, then the most we've done is
-   # set defaults (which we know we've done correct), so it's valid
-   # to the extent that we're able to check.
-   #
-
-   return 0  unless ($item);
-
-   #
-   # Make sure type is set. If it's not, set it to "unknown".
-   #
-
-   $$self{"struct"}{$path}{"type"} = "unknown"
-     if (! exists $$self{"struct"}{$path}{"type"});
-   my $type = $$self{"struct"}{$path}{"type"};
-
-   #
-   # Check to make sure that $item and $val are valid and that
-   # they don't conflict with other structural settings for
-   # this path.
-   #
-
-   my $set_ordered    = 0;
-   my $set_uniform    = 0;
-   my $valid          = 0;
-
-   # Type checks
-   if ($item eq "type") {
-      $valid = 1;
-      if ($val ne "scalar"  &&
-          $val ne "array"   &&
-          $val ne "hash"    &&
-          $val ne "other") {
-         _warn($self,"[structure] Type invalid: $val");
-         return 1;
-      }
-      if ($type ne "unknown"  &&
-          $type ne "array/hash") {
-         _warn($self,"[structure] Type already set: $val");
-         return 2;
-      }
-      if ($type eq "array/hash"  &&
-          $val ne "array"        &&
-          $val ne "hash") {
-         _warn($self,"[structure] Array or hash type required: $val");
-         return 3;
-      }
-   }
-
-   # Ordered checks
-   if ($item eq "ordered") {
-      $valid = 1;
-      if (exists $$self{"struct"}{$path}{"ordered"}) {
-         _warn($self,"[structure] Ordered already set");
-         return 102;
-      }
-
-      # only allowed for arrays
-      if ($type eq "unknown"  ||
-          $type eq "array/hash") {
-         my $err = _structure_valid($self,"type","array",$path,@path);
-         return $err  if ($err);
-         $type = "array";
-      }
-      if ($type ne "array") {
-         _warn($self,"[structure] Ordered only applies to arrays");
-         return 101;
-      }
-      if ($val ne "0"  &&
-          $val ne "1") {
-         _warn($self,"[structure] Ordered may only be 0 or 1");
-         return 100;
-      }
-
-      # check conflicts with "uniform"
-      if (! exists $$self{"struct"}{$path}{"uniform"}) {
-         if ($val) {
-            # We're making an unknown array ordered. This can
-            # apply to uniform or non-uniform arrays, so nothing
-            # is required.
-         } else {
-            # We're making an unknown array unordered. The
-            # list must be uniform.
-            $set_uniform = 1;
-         }
-      } elsif ($$self{"struct"}{$path}{"uniform"}) {
-         # We're making an uniform list ordered or non-ordered.
-         # Both are allowed.
-      } else {
-         if ($val) {
-            # We're making an non-uniform list ordered. This is
-            # allowed.
-         } else {
-            # We're trying to make an non-uniform list unordered.
-            # This is NOT allowed.
-            _warn($self,"[structure] A non-uniform list must be ordered");
-            return 103;
-
-            # NOTE: This error will never be returned. Any time we set a
-            # list to non-uniform, it will automatically set the ordered
-            # flag appropriately, so trying to set it here will result in
-            # a 102 error.
-         }
-      }
-   }
-
-   # Uniform checks
-   if ($item eq "uniform") {
-      $valid = 1;
-      if (exists $$self{"struct"}{$path}{"uniform"}) {
-         _warn($self,"[structure] Uniform already set");
-         return 112;
-      }
-
-      # only applies to arrays and hashes
-      if ($type eq "unknown") {
-         my $err = _structure_valid($self,"type","array/hash",$path,@path);
-         return $err  if ($err);
-      }
-      if ($type ne "array"  &&
-          $type ne "hash"   &&
-          $type ne "array/hash") {
-         _warn($self,"[structure] Uniform only applies to arrays and hashes");
-         return 111;
-      }
-      if ($val ne "0"  &&
-          $val ne "1") {
-         _warn($self,"[structure] Uniform may only be 0 or 1");
-         return 110;
-      }
-
-      # check conflicts with "ordered"
-      if (exists $$self{"struct"}{$path}{"type"}  &&
-          $$self{"struct"}{$path}{"type"} eq "array") {
-         if (! exists $$self{"struct"}{$path}{"ordered"}) {
-            if ($val) {
-               # We're making an unknown array uniform. This can
-               # apply to ordered or unorderd arrays, so nothing
-               # is required.
-            } else {
-               # We're making an unknown array non-uniform. The
-               # list must be ordered.
-               $set_ordered = 1;
-            }
-         } elsif ($$self{"struct"}{$path}{"ordered"}) {
-            # We're making an ordered list uniform or non-uniform.
-            # Both are allowed.
-         } else {
-            if ($val) {
-               # We're making an unordered list uniform. This is
-               # allowed.
-            } else {
-               # We're trying to make an unordered list non-uniform.
-               # This is NOT allowed.
-               _warn($self,"[structure] An unordered list must be uniform");
-               return 113;
-
-               # NOTE: This error will never be returned. Any time we set a
-               # list to unordered, it will automatically set the uniform
-               # flag appropriately, so trying to set it here will result in
-               # a 112 error.
-            }
-         }
-      }
-   }
-
-   # $item is invalid
-   if (! $valid) {
-      _warn($self,"[structure] Invalid structural item: $item");
-      return 11;
-   }
-
-   #
-   # Check to make sure that the current path is valid with
-   # respect to the type of structure we're currently in (this
-   # is defined in the parent element).
-   #
-
-   if (@path) {
-      my $curr_ele    = $path[$#path];
-      if (exists $$self{"struct"}{$parent}{"type"}) {
-         my $parent_type = $$self{"struct"}{$parent}{"type"};
-
-         if ($parent_type eq "unknown") {
-            my $err = _structure_valid($self,"type","array/hash",
-                                       $parent,@parent);
-            return $err  if ($err);
-         }
-
-         if ($parent_type eq "scalar"  ||
-             $parent_type eq "other") {
-            _warn($self,
-                  "[structure] Intermediate path elements must be either\n" .
-                  "            array or hash: $parent");
-            return 130;
-
-         } elsif ($parent_type eq "array"  &&
-             $curr_ele =~ /^\d+$/) {
-            if (exists $$self{"struct"}{$parent}{"uniform"}) {
-               if ($$self{"struct"}{$parent}{"uniform"}) {
-                  # Parent = array,uniform  Curr = 2
-                  _warn($self,
-                        "[structure] Cannot set structural information for\n" .
-                        "            an individual element in a uniform list");
-                  return 140;
-               }
-            } else {
-               # Parent = array, unknown  Curr = 2
-               #    => force parent to be non-uniform
-               my $err = _structure_valid($self,"uniform","0",$parent,@parent);
-               return $err  if ($err);
-            }
-
-         } elsif ($parent_type eq "array"  &&
-                  $curr_ele eq "*") {
-            if (exists $$self{"struct"}{$parent}{"uniform"}) {
-               if (! $$self{"struct"}{$parent}{"uniform"}) {
-                  # Parent = array,nonuniform  Curr = *
-                  _warn($self,
-                        "[structure] Cannot set structural information for\n" .
-                        "            all elements in a non-uniform list");
-                  return 141;
-               }
-            } else {
-               # Parent = array,unknown  Curr = *
-               #    => force parent to be uniform
-               my $err = _structure_valid($self,"uniform","1",$parent,@parent);
-               return $err  if ($err);
-            }
-
-         } elsif ($parent_type eq "array") {
-            _warn($self,
-                  "[structure] List element not defined with an integer index");
-            return 150;
-
-         } elsif (($parent_type eq "hash"  ||  $parent_type eq "array/hash")  &&
-                  $curr_ele eq "*") {
-            if (exists $$self{"struct"}{$parent}{"uniform"}) {
-               if (! $$self{"struct"}{$parent}{"uniform"}) {
-                  # Parent = array/hash,non-uniform  Curr = *
-                  _warn($self,
-                        "[structure] Cannot set structural information for\n".
-                        "            all elements in a non-uniform structure\n".
-                        "            (could be hash or array)");
-                  return 161;
-               }
-            } else {
-               # Parent = hash,unknown  Curr = *
-               #    => force parent to be uniform
-               my $err = _structure_valid($self,"uniform","1",$parent,@parent);
-               return $err  if ($err);
-            }
-
-         } elsif ($parent_type eq "hash"  ||  $parent_type eq "array/hash") {
-            if (exists $$self{"struct"}{$parent}{"uniform"}) {
-               if ($$self{"struct"}{$parent}{"uniform"}) {
-                  # Parent = array/hash,uniform  Curr = foo
-                  _warn($self,
-                        "[structure] Cannot set structural information for\n" .
-                        "            an individual element in a uniform\n".
-                        "             structure (could be hash or array)");
-                  return 160;
-               }
-            } else {
-               # Parent = hash,unknown  Curr = foo
-               #    => force parent to be non-uniform
-               my $err = _structure_valid($self,"uniform","0",$parent,@parent);
-               return $err  if ($err);
-            }
-         }
-
-      } else {
-         # Parent is not type'd yet.
-
-         if ($curr_ele eq "*"  ||
-             $curr_ele =~ /^\d+$/) {
-            my $err = _structure_valid($self,"type","array/hash",
-                                       $parent,@parent);
-            return $err  if ($err);
-         } else {
-            my $err = _structure_valid($self,"type","hash",
-                                       $parent,@parent);
-            return $err  if ($err);
-         }
-      }
-   }
-
-   #
-   # Set the item
-   #
-
-   $$self{"struct"}{$path}{$item} = $val;
-   if ($set_ordered) {
-      my $err = _structure_valid($self,"ordered","1",$path,@path);
-      return $err  if ($err);
-   }
-   if ($set_uniform) {
-      my $err = _structure_valid($self,"uniform","1",$path,@path);
-      return $err  if ($err);
-   }
-}
-
-{
-   # Values for the default structural information. First value in the
-   # list is the error code for this item. Second value is the default
-   # for this item.
-
-   my %def = ( "ordered"        => [ 170, qw(0 1) ],
-               "uniform_hash"   => [ 180, qw(0 1) ],
-               "uniform_ol"     => [ 181, qw(1 0) ],
-             );
-
-   sub _set_structure_default {
-      my($self,$item,$val) = @_;
-
-      if (! exists $def{$item}) {
-         _warn($self,"[structure] Invalid item for default: $item");
-         return 10;
-      }
-      my @tmp = @{ $def{$item} };
-      my $err = shift(@tmp);
-      my %tmp = map { $_,1 } @tmp;
-      if (! exists $tmp{$val}) {
-         _warn($self,"[structure] Invalid value for default: $item = $val");
-         return $err;
-      }
-      $$self{"defstruct"}{$item} = $val;
-      return 0;
-   }
-
-   # Set up the default structure:
-   sub _structure_defaults {
-      my($self) = @_;
-      my($d) = "defstruct";
-
-      $$self{$d} = {}  if (! exists $$self{$d});
-      foreach my $key (CORE::keys %def) {
-         $$self{$d}{$key} = $def{$key}[1];
-      }
-   }
-}
-
-###############################################################################
-# SET_MERGE
-###############################################################################
-
-sub set_merge {
-   my($self,$item,$val,@args) = @_;
-
-   if (_merge_default($self,$item)) {
-      return _set_merge_default($self,$item,$val,@args);
-
-   } elsif ($item eq "merge") {
-      return _set_merge_path($self,$val,@args);
-
-   } else {
-      _warn($self,"[set_merge] Invalid item for default: $item");
-      return 10;
-   }
-}
-
-# Set a merge item for a path.
-#
-sub _set_merge_path {
-   my($self,$path,$method,$ruleset) = @_;
-   $ruleset = "*"  if (! $ruleset);
-
-   my @path = $self->path($path);
-   $path    = $self->path(\@path);
-
-   if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path}) {
-      _warn($self,"[set_merge] Method already set for path: $path");
-      return 120;
-   }
-
-   # Check type vs. method
-
-   my $type = $self->get_structure($path,"type");
-
-   if      ($type eq "array") {
-      my $ordered = $self->get_structure($path,"ordered");
-
-      if (! _merge_allowed($type,$ordered,$method)) {
-         if ($ordered) {
-            _warn($self,
-                  "[set_merge] Method not allowed for ordered list: $method");
-            return 130;
-         } else {
-            _warn($self,
-                  "[set_merge] Method not allowed for unordered list: $method");
-            return 131;
-         }
-      }
-
-   } elsif ($type eq "hash") {
-      if (! _merge_allowed($type,0,$method)) {
-         _warn($self,"[set_merge] Method not allowed for hash: $method");
-         return 132;
-      }
-
-   } elsif ($type eq "scalar"  ||  $type eq "other") {
-      if (! _merge_allowed($type,0,$method)) {
-         _warn($self,"[set_merge] Method not allowed for scalar: $method");
-         return 133;
-      }
-
-   } else {
-      _warn($self,"[set_merge] Unknown type: $path");
-      return 121;
-   }
-
-   # Set the method
-
-   $$self{"ruleset"}{$ruleset}{"path"}{$path} = $method;
-   return 0;
-}
-
-{
-   # Values for the default structural information. First value in the
-   # list is the error code for this item. Second value is the default
-   # for this item.
-
-   my %def = ( "merge_hash"     => [ 100, qw(merge
-                                             keep keep_warn
-                                             replace replace_warn
-                                             error) ],
-               "merge_ol"       => [ 101, qw(merge
-                                             keep keep_warn
-                                             replace replace_warn
-                                             error) ],
-               "merge_ul"       => [ 102, qw(append
-                                             keep keep_warn
-                                             replace replace_warn
-                                             error) ],
-               "merge_scalar"   => [ 103, qw(keep keep_warn
-                                             replace replace_warn
-                                             error) ],
-             );
-
-   sub _merge_default {
-      my($self,$item) = @_;
-      return 1  if (exists $def{$item});
-      return 0;
-   }
-
-   sub _set_merge_default {
-      my($self,$item,$val,$ruleset) = @_;
-      $ruleset = "*"  if (! $ruleset);
-
-      my @tmp = @{ $def{$item} };
-      my $err = shift(@tmp);
-      my %tmp = map { $_,1 } @tmp;
-      if (! exists $tmp{$val}) {
-         _warn($self,"[set_merge_default] Invalid value for default: " .
-               "$item = $val");
-         return $err;
-      }
-      $$self{"ruleset"}{$ruleset}{"def"}{$item} = $val;
-      return 0;
-   }
-
-   # Set up the default merge:
-   sub _merge_defaults {
-      my($self) = @_;
-
-      foreach my $key (CORE::keys %def) {
-         $$self{"ruleset"}{"*"}{"def"}{$key} = $def{$key}[1];
-      }
-
-      $$self{"ruleset"}{"keep"}{"def"} =
-        { "merge_hash"   => "keep",
-          "merge_ol"     => "keep",
-          "merge_ul"     => "keep",
-          "merge_scalar" => "keep" };
-
-      $$self{"ruleset"}{"replace"}{"def"} =
-        { "merge_hash"   => "replace",
-          "merge_ol"     => "replace",
-          "merge_ul"     => "replace",
-          "merge_scalar" => "replace" };
-
-      $$self{"ruleset"}{"default"}{"def"} =
-        { "merge_hash"   => "merge",
-          "merge_ol"     => "merge",
-          "merge_ul"     => "keep",
-          "merge_scalar" => "keep" };
-
-      $$self{"ruleset"}{"override"}{"def"} =
-        { "merge_hash"   => "merge",
-          "merge_ol"     => "merge",
-          "merge_ul"     => "replace",
-          "merge_scalar" => "replace" };
-
-   }
-
-   sub _merge_allowed {
-      my($type,$ordered,$val) = @_;
-
-      my @tmp;
-      if ($type eq "hash") {
-         @tmp = @{ $def{"merge_hash"} };
-      } elsif ($type eq "array") {
-         if ($ordered) {
-            @tmp = @{ $def{"merge_ol"} };
-         } else {
-            @tmp = @{ $def{"merge_ul"} };
-         }
-      } else {
-         @tmp = @{ $def{"merge_scalar"} };
-      }
-
-      my $err = shift(@tmp);
-      my %tmp = map { $_,1 } @tmp;
-      return 0  if (! exists $tmp{$val});
-      return 1;
-   }
-}
-
-###############################################################################
-# GET_STRUCTURE
-###############################################################################
-# Retrieve structural information for a path. Makes use of the default
-# structural information.
-
-sub get_structure {
-   my($self,$path,$info) = @_;
-   $info = "type"  if (! defined $info  ||  ! $info);
-
-   # Split the path so that we can convert all elements into "*" when
-   # appropriate.
-
-   my @path = $self->path($path);
-   my @p    = ();
-   my $p    = "/";
-   return ""  if (! exists $$self{"struct"}{$p});
-
-   while (@path) {
-      my $ele = shift(@path);
-      my $p1  = $self->path([@p,"*"]);
-      my $p2  = $self->path([@p,$ele]);
-      if (exists $$self{"struct"}{$p1}) {
-         push(@p,"*");
-         $p = $p1;
-      } elsif (exists $$self{"struct"}{$p2}) {
-         push(@p,$ele);
-         $p = $p2;
-      } else {
-         return "";
-      }
-   }
-
-   # Return the information about the path.
-
-   return $$self{"struct"}{$p}{$info}  if (exists $$self{"struct"}{$p}{$info});
-   return ""  if (! exists $$self{"struct"}{$p}{"type"});
-
-   my $type = $$self{"struct"}{$p}{"type"};
-
-   if      ($info eq "ordered") {
-      return ""  unless ($type eq "array");
-      return $$self{"defstruct"}{"ordered"};
-
-   } elsif ($info eq "uniform") {
-      if      ($type eq "hash") {
-         return $$self{"defstruct"}{"uniform_hash"};
-      } elsif ($type eq "array") {
-         my $ordered = $self->get_structure($p,"ordered");
-         if ($ordered) {
-            return $$self{"defstruct"}{"uniform_ol"};
-         } else {
-            return 1;
-         }
-
-      } else {
-         return "";
-      }
-
-   } elsif ($info eq "merge") {
-      if ($type eq "array") {
-         my $ordered = $self->get_structure($p,"ordered");
-         if ($ordered) {
-            return $$self{"defstruct"}{"merge_ol"};
-         } else {
-            return $$self{"defstruct"}{"merge_ul"};
-         }
-
-      } elsif ($type eq "hash") {
-         return $$self{"defstruct"}{"merge_hash"};
-
-      } else {
-         return $$self{"defstruct"}{"merge_scalar"};
-      }
-
-   } elsif ($info eq "keys") {
-      return ""  if ($type ne "hash");
-      return ""  if (exists $$self{"struct"}{$p}{"uniform"}  &&
-                     $$self{"struct"}{$p}{"uniform"});
-      my @keys = ();
-    PP: foreach my $pp (CORE::keys %{ $$self{"struct"} }) {
-         # Look for paths of the form: $p/KEY
-         my @pp = $self->path($pp);
-         next  if ($#pp != $#p + 1);
-         my $key = pop(@pp);
-         my $tmp = $self->path(\@pp);
-         next  if ($tmp ne $p);
-         push(@keys,$key);
-      }
-      return sort @keys;
-
-   } else {
-      return "";
-   }
-}
-
-###############################################################################
-# GET_MERGE
-###############################################################################
-
-sub get_merge {
-   my($self,$path,$ruleset) = @_;
-   $ruleset = "*"  if (! $ruleset);
-   my @path = $self->path($path);
-   $path    = $self->path(\@path);
-
-   # Check ruleset
-
-   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
-     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
-
-   my $type    = $self->get_structure($path,"type");
-   my $ordered = $self->get_structure($path,"ordered");
-
-   if ($type eq "hash") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"}
-        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"});
-
-   } elsif ($type eq "array"  &&  $ordered) {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"}
-        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"});
-
-   } elsif ($type eq "array") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"}
-        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"});
-
-   } elsif ($type eq "scalar"  ||  $type eq "other") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"}
-        if (exists $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"});
-
-   } else {
-      return "";
-   }
-
-   # Check "*" (this should always find something)
-
-   $ruleset = "*";
-
-   return $$self{"ruleset"}{$ruleset}{"path"}{$path}
-     if (exists $$self{"ruleset"}{$ruleset}{"path"}{$path});
-
-   if ($type eq "hash") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_hash"};
-
-   } elsif ($type eq "array"  &&  $ordered) {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ol"};
-
-   } elsif ($type eq "array") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_ul"};
-
-   } elsif ($type eq "scalar"  ||  $type eq "other") {
-      return $$self{"ruleset"}{$ruleset}{"def"}{"merge_scalar"};
-   }
-}
-
-###############################################################################
-# CHECK_STRUCTURE/CHECK_VALUE
-###############################################################################
-# This checks the structure of an NDS (and may update the structural
-# information if appropriate).
-
-sub check_structure {
-   my($self,$nds,$new) = @_;
-   $nds = _nds($self,$nds);
-   return (0,"")  if (! $$self{"structure"});
-   $new = 0  if (! $new);
-
-   _check_structure($self,$nds,$new,());
-}
-
-sub check_value {
-   my($self,$path,$val,$new) = @_;
-   my(@path) = $self->path($path);
-   return _check_structure($self,$val,$new,@path);
-}
-
-sub _check_structure {
-   my($self,$nds,$new,@path) = @_;
-   return (0,"")  if (! defined $nds);
-   my $path = $self->path([@path]);
-
-   # Check to make sure that it's the correct type of data.
-
-   my $type = $self->get_structure($path,"type");
-   if ($type) {
-      my $ref = lc(ref($nds));
-      $ref    = "scalar"  if (! $ref);
-
-      if      ($type eq "hash"  ||  $type eq "array"  ||  $type eq "scalar") {
-         if ($ref ne $type) {
-            _warn($self,
-                  "[check_structure] Invalid type (expected $type, got $ref)");
-            return (2,$path);
-         }
-
-      } elsif ($type eq "array/hash") {
-         if ($ref ne "array"  &&  $ref ne "hash") {
-            _warn($self,
-                  "[check_structure] Invalid type (expected $type, got $ref)");
-            return (2,$path);
-         }
-         $type = "";
-
-      } elsif ($type eq "other") {
-         if ($ref eq "scalar"  ||
-             $ref eq "hash"    ||
-             $ref eq "array") {
-            _warn($self,
-                  "[check_structure] Invalid type (expected $type, got $ref)");
-            return (2,$path);
-         }
-
-      } elsif ($type eq "unknown") {
-         $type = "";
-
-      } else {
-         die "[check_structure] Impossible error: $type";
-      }
-   }
-
-   if (! $type) {
-      if ($new) {
-         $type = lc(ref($nds));
-         if (! $type) {
-            _set_structure_path($self,"type","scalar",$path);
-         } elsif ($type eq "hash"  ||
-                  $type eq "array") {
-            _set_structure_path($self,"type",$type,$path);
-         } else {
-            _set_structure_path($self,"type","other",$path);
-         }
-
-      } else {
-         _warn($self,
-               "[check_structure] New structure not allowed");
-         return (1,$path);
-      }
-   }
-
-   return (0,"") unless ($type eq "array"  ||  $type eq "hash");
-
-   # Recurse into hashes.
-
-   my $uniform = $self->get_structure($path,"uniform");
-   if ($type eq "hash") {
-      foreach my $key (CORE::keys %$nds) {
-         my $val = $$nds{$key};
-         if ($uniform) {
-            my($err,$p) = _check_structure($self,$val,$new,@path,"*");
-            return($err,$p)  if ($err);
-         } else {
-            my($err,$p) = _check_structure($self,$val,$new,@path,$key);
-            return($err,$p)  if ($err);
-         }
-      }
-      return (0,"");
-   }
-
-   # Recurse into arrays
-
-   for (my $i=0; $i<=$#$nds; $i++) {
-      my $val = $$nds[$i];
-      if ($uniform) {
-         my($err,$p) = _check_structure($self,$val,$new,@path,"*");
-         return($err,$p)  if ($err);
-      } else {
-         my($err,$p) = _check_structure($self,$val,$new,@path,$i);
-         return($err,$p)  if ($err);
-      }
-   }
-
-   return (0,"")
-}
-
-###############################################################################
 # MERGE_PATH
 ###############################################################################
 
 sub merge_path {
    my($self,$nds,$val,$path,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
 
    my @path  = $self->path($path);
    $path     = $self->path(\@path);
 
    return merge($self,$nds,$val,@args)  if (! @path);
-
-   #
-   # Get nds by reference or name
-   #
-
-   $nds = _nds($self,$nds);
-   if (! defined($nds)) {
-      _warn($self,"[merge_path] NDS undefined: $nds");
-      return 1;
-   }
 
    #
    # Parse ruleset and new arguments
@@ -1544,14 +1761,33 @@ sub merge_path {
    }
 
    #
+   # Get nds by reference or name
+   #
+
+   $nds = _nds($self,$nds,0,0,1);
+   if (! defined($nds)) {
+      $$self{"err"}    = "ndsmer17";
+      $$self{"errmsg"} = "Attempt to merge a value into an undefined NDS: $nds";
+      return;
+   }
+
+   #
    # Check structure
    #
 
-   my ($err,$v) = $self->check_structure($nds,$new);
-   return 2  if ($err);
+   $self->check_structure($nds,$new);
+   if ($self->err()) {
+      $$self{"err"}    = "ndsmer18";
+      $$self{"errmsg"} = "The NDS has an invalid structure: $path";
+      return;
+   }
 
-   ($err,$v) = _check_structure($self,$val,$new,@path);
-   return 3  if ($err);
+   _check_structure($self,$val,$new,@path);
+   if ($self->err()) {
+      $$self{"err"}    = "ndsmer19";
+      $$self{"errmsg"} = "The value has an invalid structure: $path";
+      return;
+   }
 
    #
    # Get the NDS stored at the path.
@@ -1570,14 +1806,14 @@ sub merge_path {
    } elsif (ref($nds) eq "ARRAY") {
       $$nds[$ele] = _merge($self,$$nds[$ele],$val,[@path,$ele],$ruleset);
    }
-   return 0;
+   return;
 }
 
 # This returns the NDS stored at @path in $nds. $pathref is the path
 # of $nds with respect to the main NDS structure.
 #
 # Since we removed the last element of the path in the merge_path
-# method, this can ONLY be called with hash/array structures.
+# method, this can ONLY be called with hash/list structures.
 #
 sub _merge_path_nds {
    my($self,$nds,$pathref,@path) = @_;
@@ -1626,16 +1862,15 @@ sub _merge_path_nds {
 
 sub erase {
    my($self,$nds,$path) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
 
    #
    # Get the NDS
    #
 
-   $nds = _nds($self,$nds);
-   if (! defined($nds)) {
-      _warn($self,"[erase] NDS undefined: $nds");
-      return 1;
-   }
+   $nds = _nds($self,$nds,1,0,0);
+   return undef  if ($self->err());
 
    #
    # If $path not passed in, clear the entire NDS
@@ -1648,7 +1883,7 @@ sub erase {
       } elsif (ref($nds) eq "ARRAY") {
          @$nds = ();
       }
-      return 0;
+      return 1;
    }
 
    #
@@ -1656,9 +1891,8 @@ sub erase {
    #
 
    my $ele = pop(@path);
-   my($valid,$where);
-   ($valid,$nds,$where) = $self->valid($nds,[@path]);
-   return 2  if (! $valid);
+   $nds    = $self->value($nds,[@path]);
+   return undef  if ($self->err());
 
    #
    # Delete the element
@@ -1668,7 +1902,7 @@ sub erase {
       if (exists $$nds{$ele}) {
          delete $$nds{$ele};
       } else {
-         return 2;
+         return 0;
       }
 
    } else {
@@ -1677,18 +1911,233 @@ sub erase {
          if (defined $$nds[$ele]) {
             $$nds[$ele] = undef;
          } else {
-            return 2;
+            return 0;
          }
       } else {
          if (defined $$nds[$ele]) {
             splice(@$nds,$ele,1);
          } else {
-            return 2;
+            return 0;
          }
       }
    }
 
-   return 0;
+   return 1;
+}
+
+###############################################################################
+# WHICH
+###############################################################################
+
+sub which {
+   my($self,$nds,@crit) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+
+   $nds = _nds($self,$nds,1,0,0);
+
+   if (! @crit) {
+      my %ret;
+      _which_scalar($self,$nds,\%ret,{},[]);
+      return %ret;
+   } else {
+      my(@re,%vals,%ret);
+      foreach my $crit (@crit) {
+         if (ref($crit) eq "Regexp") {
+            push(@re,$crit);
+         } else {
+            $vals{$crit} = 1;
+         }
+      }
+      _which_scalar($self,$nds,\%ret,\%vals,\@re);
+      return %ret;
+   }
+}
+
+# Sets %ret to be a hash of PATH => VAL for every path which
+# passes one of the criteria.
+#
+# If %vals is not empty, a path passes if it's value is any of
+# the keys in %vals.
+#
+# If @re is not empty, a path passes if it matches any of the
+# regular expressions in @re.
+#
+sub _which_scalar {
+   my($self,$nds,$ret,$vals,$re,@path) = @_;
+
+   if (ref($nds) eq "HASH") {
+      foreach my $key (CORE::keys %$nds) {
+         _which_scalar($self,$$nds{$key},$ret,$vals,$re,@path,$key);
+      }
+
+   } elsif (ref($nds) eq "ARRAY") {
+      foreach (my $i = 0; $i <= $#$nds; $i++) {
+         _which_scalar($self,$$nds[$i],$ret,$vals,$re,@path,$i);
+      }
+
+   } else {
+      my $path = $self->path([@path]);
+      my $crit = 0;
+
+      if (CORE::keys %$vals) {
+         $crit = 1;
+         if (exists $$vals{$nds}) {
+            $$ret{$path} = $nds;
+            return;
+         }
+      }
+
+      if (@$re) {
+         $crit = 1;
+         foreach my $re (@$re) {
+            if ($nds =~ $re) {
+               $$ret{$path} = $nds;
+               return;
+            }
+         }
+      }
+
+      return  if ($crit);
+
+      # No criteria passed in
+      $$ret{$path} = $nds   if (defined $nds);
+      return;
+   }
+}
+
+###############################################################################
+# PATHS
+###############################################################################
+
+sub paths {
+   my($self,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   @args = ("scalar")  if (! @args);
+
+   # Parse parameters
+
+   my %tmp;
+   foreach my $arg (@args) {
+      if ($arg eq "scalar"  ||
+          $arg eq "list"    ||
+          $arg eq "hash") {
+         if (exists $tmp{"scalar"}  ||
+             exists $tmp{"list"}    ||
+             exists $tmp{"hash"}) {
+            $$self{"err"}    = "ndsdat07";
+            $$self{"errmsg"} = "Invalid parameter combination in paths " .
+              "method: @args";
+            return undef;
+         }
+      } elsif ($arg eq "uniform"  ||
+               $arg eq "nonuniform") {
+         if (exists $tmp{"uniform"}  ||
+             exists $tmp{"nonuniform"}) {
+            $$self{"err"}    = "ndsdat07";
+            $$self{"errmsg"} = "Invalid parameter combination in paths " .
+              "method: @args";
+            return undef;
+         }
+      } elsif ($arg eq "ordered"  ||
+               $arg eq "unordered") {
+         if (exists $tmp{"ordered"}  ||
+             exists $tmp{"unordered"}) {
+            $$self{"err"}    = "ndsdat07";
+            $$self{"errmsg"} = "Invalid parameter combination in paths " .
+              "method: @args";
+            return undef;
+         }
+      } else {
+         $$self{"err"}    = "ndsdat08";
+         $$self{"errmsg"} = "Invalid parameter in paths method: $arg";
+         return undef;
+      }
+      $tmp{$arg} = 1;
+   }
+
+   if (exists $tmp{"scalar"}  &&
+       (exists $tmp{"uniform"}     ||
+        exists $tmp{"nonuniform"}  ||
+        exists $tmp{"ordered"}     ||
+        exists $tmp{"unordered"})) {
+      $$self{"err"}    = "ndsdat07";
+      $$self{"errmsg"} = "Invalid parameter combination in paths " .
+        "method: @args";
+      return undef;
+   }
+
+   if (exists $tmp{"hash"}  &&
+       (exists $tmp{"ordered"}     ||
+        exists $tmp{"unordered"})) {
+      $$self{"err"}    = "ndsdat07";
+      $$self{"errmsg"} = "Invalid parameter combination in paths " .
+        "method: @args";
+      return undef;
+   }
+
+   if (exists $tmp{"list"}       &&
+       exists $tmp{"unordered"}  &&
+       exists $tmp{"nonuniform"}) {
+      $$self{"err"}    = "ndsdat07";
+      $$self{"errmsg"} = "Invalid parameter combination in paths " .
+        "method: @args";
+      return undef;
+   }
+
+   # Check which paths fit
+
+
+   my @ret = sort(CORE::keys %{ $$self{"struct"} });
+
+   my $type = "";
+   if      (exists $tmp{"scalar"}) {
+      $type = "scalar";
+   } elsif (exists $tmp{"list"}) {
+      $type = "list";
+   } elsif (exists $tmp{"hash"}) {
+      $type = "hash";
+   }
+   if ($type) {
+      my @tmp;
+      foreach my $path (@ret) {
+         push(@tmp,$path)  if ($$self{"struct"}{$path}{"type"} eq $type);
+      }
+      @ret = @tmp;
+   }
+
+   my $ordered = "";
+   if      (exists $tmp{"ordered"}) {
+      $ordered = 1;
+   } elsif (exists $tmp{"unordered"}) {
+      $ordered = 0;
+   }
+   if ($ordered ne "") {
+      my @tmp;
+      foreach my $path (@ret) {
+         push(@tmp,$path)  if (exists $$self{"struct"}{$path}{"ordered"}  &&
+                               $$self{"struct"}{$path}{"ordered"} == $ordered);
+      }
+      @ret = @tmp;
+   }
+
+   my $uniform = "";
+   if      (exists $tmp{"uniform"}) {
+      $uniform = 1;
+   } elsif (exists $tmp{"nonuniform"}) {
+      $uniform = 0;
+   }
+   if ($uniform ne "") {
+      my @tmp;
+      foreach my $path (@ret) {
+         push(@tmp,$path)  if (exists $$self{"struct"}{$path}{"uniform"}  &&
+                               $$self{"struct"}{$path}{"uniform"} == $uniform);
+      }
+      @ret = @tmp;
+   }
+
+   return @ret;
 }
 
 ###############################################################################
@@ -1696,32 +2145,39 @@ sub erase {
 ###############################################################################
 
 sub identical {
-   my($self,$nds1,$nds2,@args) = @_;
-   $nds1 = _nds($self,$nds1);
-   $nds2 = _nds($self,$nds2);
+   my($self,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+
+   my($nds1,$nds2,$path) = _ic_args($self,@args);
+   return  if ($self->err());
+
    _DBG_begin("Identical");
 
-   my $flag = _identical_contains($self,$nds1,$nds2,1,@args);
+   my $flag = _identical_contains($self,$nds1,$nds2,1,$path);
 
    _DBG_end($flag);
    return $flag;
 }
 
 sub contains {
-   my($self,$nds1,$nds2,@args) = @_;
-   $nds1 = _nds($self,$nds1);
-   $nds2 = _nds($self,$nds2);
+   my($self,@args) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+
+   my($nds1,$nds2,$path) = _ic_args($self,@args);
+   return  if ($self->err());
+
    _DBG_begin("Contains");
 
-   my $flag = _identical_contains($self,$nds1,$nds2,0,@args);
+   my $flag = _identical_contains($self,$nds1,$nds2,0,$path);
 
    _DBG_end($flag);
    return $flag;
 }
 
-sub _identical_contains {
-   my($self,$nds1,$nds2,$identical,@args) = @_;
-   _DBG_enter("_identical_contains");
+sub _ic_args {
+   my($self,$nds1,$nds2,@args) = @_;
 
    #
    # Parse $new and $path
@@ -1747,59 +2203,35 @@ sub _identical_contains {
    }
 
    #
-   # Get nds1 and nds2 by reference or name
+   # Check the two NDSes for validity, and return them as refs.
    #
 
-   if (! defined($nds1)) {
-      _warn($self,"[identical/contains] NDS1 undefined: $nds1");
-      _DBG_leave("ERROR NDS1 undefined");
-      return 1;
+   $nds1 = _nds($self,$nds1,$new,0,0);
+   if ($self->err()) {
+      $$self{"err"}    = "ndside01";
+      $$self{"errmsg"} = "The first NDS is invalid: $nds1";
+      return;
+   }
+   $nds2 = _nds($self,$nds2,$new,0,0);
+   if ($self->err()) {
+      $$self{"err"}    = "ndside02";
+      $$self{"errmsg"} = "The first NDS is invalid: $nds2";
+      return;
    }
 
-   if (! defined($nds2)) {
-      _warn($self,"[identical/contains] NDS2 undefined: $nds2");
-      _DBG_leave("ERROR NDS2 undefined");
-      return 1;
-   }
+   return ($nds1,$nds2,$path);
+}
 
-   #
-   # Check structure
-   #
-
-   my ($err,$val) = $self->check_structure($nds1,$new);
-   if ($err) {
-      _DBG_leave("ERROR check_structure 1");
-      return undef;
-   }
-
-   ($err,$val) = $self->check_structure($nds2,$new);
-   if ($err) {
-      _DBG_leave("ERROR check_structure 2");
-      return undef;
-   }
+sub _identical_contains {
+   my($self,$nds1,$nds2,$identical,$path) = @_;
+   _DBG_enter("_identical_contains");
 
    #
    # Handle $path
    #
 
-   my (@path);
-   if ($path) {
-      my($valid,$where);
-      ($valid,$nds1,$where) = $self->valid($nds1,$path);
-      if (! $valid) {
-         _DBG_leave("ERROR invalid 1");
-         return undef;
-      }
-
-      ($valid,$nds2,$where) = $self->valid($nds2,$path);
-      if (! $valid) {
-         _DBG_leave("ERROR invalid 2");
-         return undef;
-      }
-
-      @path = $self->path($path);
-      $path = $self->path($path);
-   }
+   $path    = $self->path($path);
+   my @path = $self->path($path);
 
    #
    # We will now recurse through the data structure and get an
@@ -1815,10 +2247,14 @@ sub _identical_contains {
    # the mpath is:
    #   /foo/_ul_1/bar/_ul_2
    # (assuming that the 2nd and 4th elements are indices in unorderd
-   #lists).
+   # lists).
    #
 
    my(%desc1,%desc2);
+   if ($path ne "/") {
+      $nds1 = $self->value($nds1,$path);
+      $nds2 = $self->value($nds2,$path);
+   }
    _ic_desc($self,$nds1,\%desc1,[@path],[@path],0,$self->delim());
    _ic_desc($self,$nds2,\%desc2,[@path],[@path],0,$self->delim());
 
@@ -2248,95 +2684,18 @@ sub _ic_permutation {
 }
 
 ###############################################################################
-# WHICH
-###############################################################################
-
-sub which {
-   my($self,$nds,@crit) = @_;
-   $nds = _nds($self,$nds);
-
-   if (! @crit) {
-      my %ret;
-      _which_scalar($self,$nds,\%ret,{},[]);
-      return %ret;
-   } else {
-      my(@re,%vals,%ret);
-      foreach my $crit (@crit) {
-         if (ref($crit) eq "Regexp") {
-            push(@re,$crit);
-         } else {
-            $vals{$crit} = 1;
-         }
-      }
-      _which_scalar($self,$nds,\%ret,\%vals,\@re);
-      return %ret;
-   }
-}
-
-# Sets %ret to be a hash of PATH => VAL for every path which
-# passes one of the criteria.
-#
-# If %vals is not empty, a path passes if it's value is any of
-# the keys in %vals.
-#
-# If @re is not empty, a path passes if it matches any of the
-# regular expressions in @re.
-#
-sub _which_scalar {
-   my($self,$nds,$ret,$vals,$re,@path) = @_;
-
-   if (ref($nds) eq "HASH") {
-      foreach my $key (CORE::keys %$nds) {
-         _which_scalar($self,$$nds{$key},$ret,$vals,$re,@path,$key);
-      }
-
-   } elsif (ref($nds) eq "ARRAY") {
-      foreach (my $i = 0; $i <= $#$nds; $i++) {
-         _which_scalar($self,$$nds[$i],$ret,$vals,$re,@path,$i);
-      }
-
-   } else {
-      my $path = $self->path([@path]);
-      my $crit = 0;
-
-      if (CORE::keys %$vals) {
-         $crit = 1;
-         if (exists $$vals{$nds}) {
-            $$ret{$path} = $nds;
-            return;
-         }
-      }
-
-      if (@$re) {
-         $crit = 1;
-         foreach my $re (@$re) {
-            if ($nds =~ $re) {
-               $$ret{$path} = $nds;
-               return;
-            }
-         }
-      }
-
-      return  if ($crit);
-
-      # No criteria passed in
-      $$ret{$path} = $nds   if (defined $nds);
-      return;
-   }
-}
-
-###############################################################################
 # PRINT
 ###############################################################################
 
 sub print {
    my($self,$nds,%opts) = @_;
+   $nds = _nds($self,$nds,1,0,1);
 
    if (exists $opts{"indent"}) {
       my $opt = $opts{"indent"};
       if ($opt !~ /^\d+$/  ||
           $opt < 1) {
-         _warn($self,"Invalid option: indent: $opt",1);
+         warn($self,"Invalid option: indent: $opt",1);
          return;
       }
    } else {
@@ -2347,7 +2706,7 @@ sub print {
       my $opt = $opts{"width"};
       if ($opt !~ /^\d+$/  ||
           ($opt > 0  &&  $opt < 20)) {
-         _warn($self,"Invalid option: width: $opt",1);
+         warn($self,"Invalid option: width: $opt",1);
          return;
       }
    } else {
@@ -2359,7 +2718,7 @@ sub print {
    if (exists $opts{"maxlevel"}) {
       my $opt = $opts{"maxlevel"};
       if ($maxlevel != 0  &&  $opt > $maxlevel) {
-         _warn($self,"Maxlevel exceeded: $opt > $maxlevel",1);
+         warn($self,"Maxlevel exceeded: $opt > $maxlevel",1);
          $opts{"maxlevel"} = $maxlevel;
       }
    } else {

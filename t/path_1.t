@@ -18,7 +18,6 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
   my @l   = $obj->path(@test);
   return @l;
 }
@@ -39,7 +38,7 @@ a/b ~ a b
 ";
 
 print "path (string->list)...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

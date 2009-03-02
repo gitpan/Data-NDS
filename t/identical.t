@@ -18,7 +18,6 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
 
   my $i = $obj->identical("nds1","nds2",@test);
   my $c = $obj->contains("nds1","nds2",@test);
@@ -27,9 +26,9 @@ sub test {
 
 $obj = new Data::NDS;
 
-$obj->set_structure("type",    "array",   "/ele04");
+$obj->set_structure("type",    "list",   "/ele04");
 $obj->set_structure("ordered", "0",       "/ele04");
-$obj->set_structure("type",    "array",   "/ele04/*");
+$obj->set_structure("type",    "list",   "/ele04/*");
 $obj->set_structure("ordered", "0",       "/ele04/*");
 
 
@@ -111,7 +110,7 @@ $tests = "
 ";
 
 print "identical/contains...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

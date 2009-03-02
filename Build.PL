@@ -3,7 +3,7 @@ use Module::Build;
 
 my $build = Module::Build->new(
 	license            => 'perl',
-	dist_version       => '1.05',
+	dist_version       => '3.00',
 	dist_author        => 'Sullivan Beck <sbeck@cpan.org>',
 	module_name        => 'Data::NDS',
 	dist_abstract      => 'routines to work with a perl nested data structure',

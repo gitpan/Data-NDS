@@ -18,53 +18,23 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
-  return $obj->empty(@test);
+  return $obj->ruleset_valid(@test);
 }
 
 $obj = new Data::NDS;
+$obj->ruleset("foo");
 
-$tests =
-[
-  [
-    [ ],
-    [ 1 ]
-  ],
+$tests = "
+foo ~ 1
 
-  [
-    [ undef ],
-    [ 1 ]
-  ],
+keep ~ 1
 
-  [
-    [ [ "" ] ],
-    [ 0 ]
-  ],
+bar ~ 0
 
-  [
-    [ [ "", undef ] ],
-    [ 0 ]
-  ],
+";
 
-  [
-    [ [ undef, undef ] ],
-    [ 1 ]
-  ],
-
-  [
-    [ { 1, "", 2, undef } ],
-    [ 0 ]
-  ],
-
-  [
-    [ { 1, undef, 2, undef } ],
-    [ 1 ]
-  ],
-
-];
-
-print "empty...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+print "ruleset_valid...\n";
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

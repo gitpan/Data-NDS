@@ -18,48 +18,52 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $nds = pop(@test);
-  my $obj = pop(@test);
-  return $obj->valid($nds,@test);
+  return $obj->empty(@test);
 }
 
 $obj = new Data::NDS;
-$nds = { "a" => undef,
-         "b" => "foo",
-         "c" => [ "c1", "c2" ],
-         "d" => { "d1k" => "d1v", "d2k" => "d2v" },
-         "e" => \&foo
-       };
 
-$tests = "
-/a ~ 1 _undef_
+$tests =
+[
+  [
+    [ ],
+    [ 1 ]
+  ],
 
-/a/b ~ 0 0 /a/b
+  [
+    [ undef ],
+    [ 1 ]
+  ],
 
-/x ~ 0 1 /x
+  [
+    [ [ "" ] ],
+    [ 1 ]
+  ],
 
-/d/d3k ~ 0 1 /d/d3k
+  [
+    [ [ "", undef ] ],
+    [ 1 ]
+  ],
 
-/c/2 ~ 0 2 /c/2
+  [
+    [ [ undef, undef ] ],
+    [ 1 ]
+  ],
 
-/b/x ~ 0 10 /b/x
+  [
+    [ { 1, "", 2, undef } ],
+    [ 1 ]
+  ],
 
-/e/x ~ 0 11 /e/x
+  [
+    [ { 1, undef, 2, undef } ],
+    [ 1 ]
+  ],
 
-/c/x ~ 0 12 /c/x
+];
 
-/b ~ 1 foo
-
-/c/1 ~ 1 c2
-
-/d/d2k ~ 1 d2v
-
-/f/1/2 ~ 0 1 /f
-
-";
-
-print "valid...\n";
-test_Func(\&test,$tests,$runtests,$obj,$nds);
+print "empty...\n";
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

@@ -18,11 +18,12 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
   if ($test[0] eq "CHECK") {
-    return @test[1..$#test];
+    return (defined $test[1] ? $test[1] : '');
   }
-  return $obj->get_structure(@test);
+  @val = $obj->get_structure(@test);
+  $err = $obj->err();
+  return (@val,$err);
 }
 
 $obj = new Data::NDS;
@@ -30,54 +31,61 @@ $obj = new Data::NDS;
 $o = { a => [ 1,2,3 ],
        b => { bb => 1 },
      };
-($e1,$p1) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e1 = $obj->err();
 
 $o = { a => [ 1 ] };
-($e2,$p2) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e2 = $obj->err();
 
 $o = { a => [ { aa => 1 } ] };
-($e3,$p3) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e3 = $obj->err();
 
 $o = { a => 1 };
-($e4,$p4) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e4 = $obj->err();
 
 $o = { b => { bb => [ 1 ] } };
-($e5,$p5) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e5 = $obj->err();
 
 $o = { c => 1 };
-($e6,$p6) = $obj->check_structure($o,0);
+$obj->check_structure($o,0);
+$e6 = $obj->err();
 
 $o = { b => { cc => [ 1 ] } };
-($e7,$p7) = $obj->check_structure($o,1);
+$obj->check_structure($o,1);
+$e7 = $obj->err();
 
 $tests = "
 
-CHECK $e1 $p1 ~ 0
+CHECK $e1 ~ _blank_
 
-CHECK $e2 $p2 ~ 0
+CHECK $e2 ~ _blank_
 
-CHECK $e3 $p3 ~ 2 /a/*
+CHECK $e3 ~ ndschk01
 
-CHECK $e4 $p4 ~ 2 /a
+CHECK $e4 ~ ndschk01
 
-CHECK $e5 $p5 ~ 2 /b/bb
+CHECK $e5 ~ ndschk01
 
-CHECK $e6 $p6 ~ 1 /c
+CHECK $e6 ~ ndschk02
 
-CHECK $e7 $p7 ~ 0
+CHECK $e7 ~ _blank_
 
-/a ~ array
+/a ~ list _blank_
 
-/b ~ hash
+/b ~ hash _blank_
 
-/b/bb ~ scalar
+/b/bb ~ scalar _blank_
 
-/b/cc ~ array
+/b/cc ~ list _blank_
 
 ";
 
 print "check_structure...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

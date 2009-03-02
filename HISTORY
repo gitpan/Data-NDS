@@ -36,4 +36,22 @@ Version 1.04  2008-06-12
 Version 1.05  2008-06-19
    Fixed a bug in merging
 
-Version 1.06
+Version 3.00  2009-03-02
+   NOTE: jumped versions to synchronize Data::NDS modules
+   Backwards incompatible rethink of the module.
+   Almost all functions have changed slightly (different error codes,
+      different return values).
+
+Version 3.01
+
+########################################################################
+# BACKWARDS INCOMPATIBILITIES
+########################################################################
+
+Version 3.00
+   *** NOTE ***
+   Version 3.00 is a complete rethink/rewrite of the module. Based on
+   real-life use of the module, a number of changes were made to
+   make the module easier to use and more consistent internally.
+   I will not make such a major change again.
+

@@ -22,6 +22,7 @@ sub test {
 }
 
 $obj = new Data::NDS;
+$obj->blank(1);
 
 $obj->set_structure("type", "hash",   "/h_keep");
 $obj->set_merge    ("merge","/h_keep","keep");
@@ -144,7 +145,7 @@ $nds = {
         "ul_append2"  => [ "val_1b", "val_2b", undef ],
        };
 
-$obj->merge_path("ele",$nds,"/",1);
+$obj->merge("ele",$nds,1);
 
 $tests =
 [
@@ -195,12 +196,12 @@ $tests =
 
   [
     [ qw(/ol_keep) ],
-    [ qw(0 2 val_1a val_3a) ]
+    [ qw(0 1 2 val_1a _blank_ val_3a) ]
   ],
 
   [
     [ qw(/ol_replace) ],
-    [ qw(0 1 val_1b val_2b) ]
+    [ qw(0 1 2 val_1b val_2b _blank_) ]
   ],
 
   [
@@ -210,17 +211,17 @@ $tests =
 
   [
     [ qw(/ul_keep) ],
-    [ qw(0 2 val_1a val_3a) ]
+    [ qw(0 1 2 val_1a _blank_ val_3a) ]
   ],
 
   [
     [ qw(/ul_replace) ],
-    [ qw(0 1 val_1b val_2b) ]
+    [ qw(0 1 2 val_1b val_2b _blank_) ]
   ],
 
   [
     [ qw(/ul_append) ],
-    [ qw(0 2 3 4 val_1a val_3a val_1b val_2b) ]
+    [ qw(0 1 2 3 4 5 val_1a _blank_ val_3a val_1b val_2b _blank_) ]
   ],
 
   [
@@ -255,7 +256,7 @@ $tests =
 
 ];
 
-print "merge_path (top)...\n";
+print "merge (blank)...\n";
 test_Func(\&test,$tests,$runtests);
 
 1;

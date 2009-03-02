@@ -18,8 +18,8 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
-  return $obj->valid(@test);
+  $val = $obj->value(@test);
+  return ($val,$obj->err());
 }
 
 $obj = new Data::NDS;
@@ -35,18 +35,18 @@ $obj->nds("ele2",$nds,1);
 $obj->nds("ele3","ele1",1);
 
 $tests = "
-ele0 /a/0 ~ 0 -1
+ele0 /a/0 ~ _undef_ ndsnam01
 
-ele1 /a/0 ~ 1 a1
+ele1 /a/0 ~ a1 _blank_
 
-ele2 /a/0 ~ 1 aa1
+ele2 /a/0 ~ aa1 _blank_
 
-ele3 /a/0 ~ 1 a1
+ele3 /a/0 ~ a1 _blank_
 
 ";
 
 print "nds...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

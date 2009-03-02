@@ -18,11 +18,11 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
   return ($obj->keys("ele",@test),$obj->values("ele",@test));
 }
 
 $obj = new Data::NDS;
+$obj->blank(1);
 
 $obj->set_structure("type", "hash",   "/h_keep");
 $obj->set_merge    ("merge","/h_keep","keep");
@@ -33,51 +33,51 @@ $obj->set_merge    ("merge","/h_replace","replace");
 $obj->set_structure("type", "hash",   "/h_merge");
 $obj->set_merge    ("merge","/h_merge","merge");
 
-$obj->set_structure("type",    "array",  "/ol_keep");
+$obj->set_structure("type",    "list",  "/ol_keep");
 $obj->set_structure("ordered", "1", "/ol_keep");
 $obj->set_merge    ("merge","/ol_keep","keep");
 
-$obj->set_structure("type",    "array",  "/ol_replace");
+$obj->set_structure("type",    "list",  "/ol_replace");
 $obj->set_structure("ordered", "1", "/ol_replace");
 $obj->set_merge    ("merge","/ol_replace","replace");
 
-$obj->set_structure("type",    "array",  "/ol_merge");
+$obj->set_structure("type",    "list",  "/ol_merge");
 $obj->set_structure("ordered", "1", "/ol_merge");
 $obj->set_merge    ("merge","/ol_merge","merge");
 
-$obj->set_structure("type",    "array",  "/ul_keep");
+$obj->set_structure("type",    "list",  "/ul_keep");
 $obj->set_structure("ordered", "0", "/ul_keep");
 $obj->set_merge    ("merge","/ul_keep","keep");
 
-$obj->set_structure("type",    "array",  "/ul_replace");
+$obj->set_structure("type",    "list",  "/ul_replace");
 $obj->set_structure("ordered", "0", "/ul_replace");
 $obj->set_merge    ("merge","/ul_replace","replace");
 
-$obj->set_structure("type",    "array",  "/ul_append");
+$obj->set_structure("type",    "list",  "/ul_append");
 $obj->set_structure("ordered", "0", "/ul_append");
 $obj->set_merge    ("merge","/ul_append","append");
 
-$obj->set_structure("type",    "array",  "/ol_keep2");
+$obj->set_structure("type",    "list",  "/ol_keep2");
 $obj->set_structure("ordered", "1", "/ol_keep2");
 $obj->set_merge    ("merge","/ol_keep2","keep");
 
-$obj->set_structure("type",    "array",  "/ol_replace2");
+$obj->set_structure("type",    "list",  "/ol_replace2");
 $obj->set_structure("ordered", "1", "/ol_replace2");
 $obj->set_merge    ("merge","/ol_replace2","replace");
 
-$obj->set_structure("type",    "array",  "/ol_merge2");
+$obj->set_structure("type",    "list",  "/ol_merge2");
 $obj->set_structure("ordered", "1", "/ol_merge2");
 $obj->set_merge    ("merge","/ol_merge2","merge");
 
-$obj->set_structure("type",    "array",  "/ul_keep2");
+$obj->set_structure("type",    "list",  "/ul_keep2");
 $obj->set_structure("ordered", "0", "/ul_keep2");
 $obj->set_merge    ("merge","/ul_keep2","keep");
 
-$obj->set_structure("type",    "array",  "/ul_replace2");
+$obj->set_structure("type",    "list",  "/ul_replace2");
 $obj->set_structure("ordered", "0", "/ul_replace2");
 $obj->set_merge    ("merge","/ul_replace2","replace");
 
-$obj->set_structure("type",    "array",  "/ul_append2");
+$obj->set_structure("type",    "list",  "/ul_append2");
 $obj->set_structure("ordered", "0", "/ul_append2");
 $obj->set_merge    ("merge","/ul_append2","append");
 
@@ -145,7 +145,7 @@ $nds = {
         "ul_append2"  => [ "val_1b", "val_2b", undef ],
        };
 
-$obj->merge("ele",$nds,1);
+$obj->merge_path("ele",$nds,"/",1);
 
 $tests =
 [
@@ -161,12 +161,12 @@ $tests =
 
   [
     [ qw(/h_keep/c) ],
-    [ "","" ]
+    [ "_undef_","_undef_" ]
   ],
 
   [
     [ qw(/h_replace/a) ],
-    [ "","" ]
+    [ "_undef_","_undef_" ]
   ],
 
   [
@@ -196,12 +196,12 @@ $tests =
 
   [
     [ qw(/ol_keep) ],
-    [ qw(0 1 2 val_1a), "", qw(val_3a) ]
+    [ qw(0 1 2 val_1a _blank_ val_3a) ]
   ],
 
   [
     [ qw(/ol_replace) ],
-    [ qw(0 1 2 val_1b val_2b), "" ]
+    [ qw(0 1 2 val_1b val_2b _blank_) ]
   ],
 
   [
@@ -211,17 +211,17 @@ $tests =
 
   [
     [ qw(/ul_keep) ],
-    [ qw(0 1 2 val_1a), "", qw(val_3a) ]
+    [ qw(0 1 2 val_1a _blank_ val_3a) ]
   ],
 
   [
     [ qw(/ul_replace) ],
-    [ qw(0 1 2 val_1b val_2b), "" ]
+    [ qw(0 1 2 val_1b val_2b _blank_) ]
   ],
 
   [
     [ qw(/ul_append) ],
-    [ qw(0 1 2 3 4 5 val_1a), "", qw(val_3a val_1b val_2b), "" ]
+    [ qw(0 1 2 3 4 5 val_1a _blank_ val_3a val_1b val_2b _blank_) ]
   ],
 
   [
@@ -256,8 +256,8 @@ $tests =
 
 ];
 
-print "merge...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+print "merge_path (top,blank)...\n";
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

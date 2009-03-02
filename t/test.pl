@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# Copyright (c) 1996-2008 Sullivan Beck. All rights reserved.
+# Copyright (c) 1996-2009 Sullivan Beck. All rights reserved.
 # This program is free software; you can redistribute it and/or modify it
 # under the same terms as Perl itself.
 
@@ -26,6 +26,8 @@
 #
 # 2008-01-25  Created a global $testnum variable to store the test number
 #             in.
+#
+# 2008-11-05  Slightly better handling of blank/undef in returned values.
 
 ###############################################################################
 
@@ -211,7 +213,7 @@ sub test_Func {
       my @arg = @{ $tests[$t-1][0] };
       my @val = @{ $tests[$t-1][1] };
 
-      # Handle undef in args
+      # Handle undef/blank in args
       my @tmparg = ();
       foreach my $arg (@arg) {
 	 if (defined $arg  &&  $arg eq "_undef_") {
@@ -223,7 +225,7 @@ sub test_Func {
 	 }
       }
 
-      # Handle undef in extra
+      # Handle undef/blank in extra
       my @tmpextra = ();
       foreach my $arg (@extra) {
 	 if ($arg eq "_undef_") {
@@ -237,17 +239,10 @@ sub test_Func {
 
       my @ans = &$funcref(@tmparg,@tmpextra);
 
-      # Handle undef in ans
-      if ($#val == $#ans) {
-	 for (my($i)=0; $i<=$#val; $i++) {
-	    if ($val[$i] eq "_undef_" &&
-		! defined($ans[$i])) {
-	       $ans[$i] = "_undef_";
-	    } elsif ($val[$i] eq "_blank_" &&
-		     $ans[$i] eq "") {
-	       $ans[$i] = "_blank_";
-	    }
-	 }
+      # Handle undef/blank in ans
+      foreach my $ans (@ans) {
+         $ans = "_undef_"  if (! defined $ans);
+         $ans = "_blank_"  if ($ans eq "");
       }
 
       foreach my $ans (@ans) {
@@ -256,12 +251,13 @@ sub test_Func {
                $ans = $$ans;
             } elsif (ref $ans eq "ARRAY") {
                $ans = join(" ","[",join(", ",@$ans),"]");
+               $ans =~ s/  +/ /g;
             } elsif (ref $ans eq "HASH") {
                $ans = join(" ","{",
                            join(", ",map { "$_ => ".$$ans{$_} }
                                 (sort keys %$ans)), "}");
+               $ans =~ s/  +/ /g;
             }
-	    $ans =~ s/  +/ /g;
          } else {
 	    $ans = "";
 	 }

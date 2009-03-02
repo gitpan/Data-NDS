@@ -19,7 +19,6 @@ use Data::NDS;
 sub test {
   (@test)=@_;
   my $nds = pop(@test);
-  my $obj = pop(@test);
   my %hash = $obj->which($nds,@test);
   my @ret;
   foreach my $key (sort keys %hash) {
@@ -43,7 +42,7 @@ c2 d1v ~ /c/1 c2 /d/d1k d1v
 ";
 
 print "which...\n";
-test_Func(\&test,$tests,$runtests,$obj,$nds);
+test_Func(\&test,$tests,$runtests,$nds);
 
 1;
 # Local Variables:

@@ -18,7 +18,6 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-  my $obj = pop(@test);
   return $obj->path(@test);
 }
 
@@ -39,7 +38,7 @@ a:b ~ a b
 ";
 
 print "delim...\n";
-test_Func(\&test,$tests,$runtests,$obj);
+test_Func(\&test,$tests,$runtests);
 
 1;
 # Local Variables:

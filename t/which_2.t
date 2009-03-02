@@ -19,7 +19,6 @@ use Data::NDS;
 sub test {
   (@test)=@_;
   my $nds = pop(@test);
-  my $obj = pop(@test);
   foreach my $test (@test) {
     $test = qr/$test/;
   }
@@ -44,7 +43,7 @@ $tests = "
 ";
 
 print "which (regexp)...\n";
-test_Func(\&test,$tests,$runtests,$obj,$nds);
+test_Func(\&test,$tests,$runtests,$nds);
 
 1;
 # Local Variables:

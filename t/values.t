@@ -19,7 +19,6 @@ use Data::NDS;
 sub test {
   (@test)=@_;
   my $nds = pop(@test);
-  my $obj = pop(@test);
   return $obj->values($nds,@test);
 }
 
@@ -40,7 +39,7 @@ $tests = "
 ";
 
 print "values...\n";
-test_Func(\&test,$tests,$runtests,$obj,$nds);
+test_Func(\&test,$tests,$runtests,$nds);
 
 1;
 # Local Variables:

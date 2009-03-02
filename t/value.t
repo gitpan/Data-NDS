@@ -18,32 +18,50 @@ use Data::NDS;
 
 sub test {
   (@test)=@_;
-
-  my @out  = $obj->keys(@test);
-  push(@out,"--");
-  $obj->erase(@test);
-  push(@out,$obj->err());
-  push(@out,$obj->keys(@test));
-  return @out;
+  $val    = $obj->value($nds,@test);
+  $err    = $obj->err();
+  return($err,$val);
 }
 
 $obj = new Data::NDS;
-
-$nds1= { "a" => 1,
-         "b" => 2 };
-$nds2= { "a" => 1,
-         "b" => 2 };
-$obj->nds("ele1",$nds1,1);
-$obj->nds("ele2",$nds2,1);
+$nds = { "a" => undef,
+         "b" => "foo",
+         "c" => [ "c1", "c2" ],
+         "d" => { "d1k" => "d1v", "d2k" => "d2v" },
+         "e" => \&foo,
+         "g" => [ undef ],
+       };
 
 $tests = "
-ele1 ~ a b -- _blank_
+/a ~ _blank_ _undef_
 
-ele2 / ~ a b -- _blank_
+/a/b ~ ndsdat01 _undef_
+
+/x ~ ndsdat02 _undef_
+
+/d/d3k ~ ndsdat02 _undef_
+
+/c/2 ~ ndsdat03 _undef_
+
+/b/x ~ ndsdat04 _undef_
+
+/e/x ~ ndsdat05 _undef_
+
+/c/x ~ ndsdat06 _undef_
+
+/b ~ _blank_ foo
+
+/c/1 ~ _blank_ c2
+
+/d/d2k ~ _blank_ d2v
+
+/f/1/2 ~ ndsdat02 _undef_
+
+/g/0 ~ _blank_ _undef_
 
 ";
 
-print "erase (entire hash)...\n";
+print "value...\n";
 test_Func(\&test,$tests,$runtests);
 
 1;
