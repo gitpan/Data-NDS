@@ -40,7 +40,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "3.00";
+$VERSION = "3.10";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;
@@ -143,21 +143,22 @@ sub delim {
    sub path {
       my($self,$path) = @_;
       my $array       = wantarray;
-      my($delim)      = $self->delim();
 
       if ($array) {
          return @$path            if (ref($path));
          return ()                if (! $path);
          return @{ $path{$path} } if (exists $path{$path});
 
+         my($delim)   = $self->delim();
          my @tmp      = split(/\Q$delim\E/,$path);
          shift(@tmp)  if (! defined($tmp[0])  ||  $tmp[0] eq "");
          $path{$path} = [ @tmp ];
          return @tmp;
 
       } else {
+         my($delim)   = $self->delim();
          if (! ref($path)) {
-            return $delim         if (! $path);
+            return $delim    if (! $path);
             return $path;
          }
          return $delim . join($delim,@$path);
@@ -1071,10 +1072,11 @@ sub _check_structure {
 ###############################################################################
 
 sub value {
-   my($self,$nds,$path,$copy) = @_;
+   my($self,$nds,$path,$copy,$nocheck) = @_;
+   $nocheck=0  if (! $nocheck);
    $$self{"err"}    = "";
    $$self{"errmsg"} = "";
-   $nds = _nds($self,$nds,1,0,0);
+   $nds = _nds($self,$nds,1,0,$nocheck);
    return undef  if ($self->err());
 
    my($delim) = $self->delim();
@@ -2138,6 +2140,404 @@ sub paths {
    }
 
    return @ret;
+}
+
+###############################################################################
+# TEST_CONDITIONS
+###############################################################################
+
+sub test_conditions {
+   my($self,$nds,@cond) = @_;
+   $$self{"err"}    = "";
+   $$self{"errmsg"} = "";
+   return 1  if (! @cond);
+
+ COND: while (@cond) {
+      my $path = shift(@cond);
+      my $cond = shift(@cond);
+
+      # Get the value at the path. An error code means that the path
+      # is not defined (but the path is valid in the sense that it COULD
+      # be there... it just doesn't exist in this NDS).
+
+      my $v    = $self->value($nds,$path,0,1);
+      if ($self->err()) {
+         $$self{"err"}    = "";
+         $$self{"errmsg"} = "";
+         $v               = undef;
+      }
+
+      if (! defined $v) {
+         # no path does NOT automatically mean failure... worse, we
+         # can't tell whether it should be tested as a hash, list, or
+         # scalar
+         my($valid,$pass) = _test_hash_condition($self,$v,$cond);
+         if ($valid) {
+            return 0  if (! $pass);
+         } else {
+            return 0  if (! _test_list_condition($self,$v,$cond)  &&
+                          ! _test_scalar_condition($self,$v,$cond));
+         }
+
+      } elsif (ref($v) eq "HASH") {
+         my($valid,$pass) = _test_hash_condition($self,$v,$cond);
+         if ($valid) {
+            return 0  if (! $pass);
+         } else {
+            # Set error (invalid condition)
+            $$self{"err"}    = "ndscon01";
+            $$self{"errmsg"} = "Invalid test condition used: $path: $cond";
+            return undef;
+         }
+
+      } elsif (ref($v) eq "ARRAY") {
+         return 0  if (! _test_list_condition($self,$v,$cond));
+
+      } else {
+         return 0  if (! _test_scalar_condition($self,$v,$cond));
+      }
+   }
+
+   return 1;
+}
+
+# If $nds contains a hash, condition can be any of the following:
+#
+#    exists:VAL   : true if a key named VAL exists in the hash
+#    empty:VAL    : true if a key named VAL is empty in the hash (it
+#                   doesn't exist, or has an empty value)
+#    empty        : true if the hash is empty
+#
+sub _test_hash_condition {
+   my($self,$nds,$cond) = @_;
+
+   # Make sure it's a valid condition for this data type.
+
+   if ($cond !~ /^\!?empty(:.+)?$/i  &&
+       $cond !~ /^\!?exists:.+$/i) {
+      return (0,0);
+   }
+
+   # An undefined value:
+   #    passes empty
+   #    passes empty:VAL
+   #    passes !exists:VAL
+   #    fails  all others
+
+   if (! defined $nds) {
+      return (1,1)  if ($cond =~ /^empty/i  ||
+                    $cond =~ /^\!exists/i);
+      return (1,0);
+   }
+
+   # A non-hash element should not even be passed in.
+
+   if (ref($nds) ne "HASH") {
+     die "ERROR: [_test_hash_condition] impossible: non-hash passed in\n";
+   }
+
+   # Test for existance of a key or an empty key
+
+   if ($cond =~ /^(\!?)(exists|empty):(.+)$/) {
+      my ($not,$op,$key) = ($1,$2,$3);
+      my $exists = (exists $$nds{$key});
+
+      if (lc($op) eq "exists") {
+         return (1,1)  if ( ($exists  &&  ! $not) ||
+                        (! $exists  &&  $not) );
+         return (1,0);
+      }
+
+      my $empty = 1;
+      $empty    = $self->empty([ $$nds{$key} ])  if ($exists);
+
+      return (1,1)  if ( ($empty  &&  ! $not) ||
+                     (! $empty  &&  $not) );
+      return (1,0);
+   }
+
+   # An empty value:
+   #    passes empty
+   #    fails  !empty
+   # A non-empty value:
+   #    fails  empty
+   #    passes !empty
+
+   $cond = lc($cond);
+   if ($self->empty($nds)) {
+      return (1,1)  if ($cond eq "empty");
+      return (1,0)  if ($cond eq "!empty");
+   } else {
+      return (1,0)  if ($cond eq "empty");
+      return (1,1)  if ($cond eq "!empty");
+   }
+}
+
+# If $path refers to a list, conditions may be any of the following:
+#
+#    empty        : true if the list is empty
+#    defined:VAL  : true if the VAL'th (VAL is an integer) element
+#                   is defined
+#    empty:VAL    : true if the VAL'th (VAL is an integer) element
+#                   is empty (or not defined)
+#    contains:VAL : true if the list contains the element VAL
+#    <:VAL        : true if the list has fewer than VAL (an integer)
+#                   non-empty elements
+#    <=:VAL
+#    =:VAL
+#    >:VAL
+#    >=:VAL
+#    VAL          : equivalent to contains:VAL
+#
+sub _test_list_condition {
+   my($self,$nds,$cond) = @_;
+
+   # An undefined value:
+   #    passes empty
+   #    passes empty:VAL
+   #    passes !defined:VAL
+   #    passes !contains:VAL
+   #    passes =:0
+   #    passes !=:*  (not zero)
+   #    passes <:*
+   #    passes <=:*
+   #    passes >=:0
+   #    fails  all others
+
+   if (! defined($nds)) {
+      return 1  if ($cond =~ /^empty(:.+)?$/i      ||
+                    $cond =~ /^\!defined:(.+)$/i   ||
+                    $cond =~ /^\!contains:(.+)$/i  ||
+                    $cond eq "=:0"                 ||
+                    $cond =~ /^\!=:(\d*[1-9]\d*)$/ ||
+                    $cond =~ /^<:(\d+)$/           ||
+                    $cond =~ /^<=:(\d+)$/          ||
+                    $cond eq ">=:0");
+      return 0;
+   }
+
+   # A non-list element should not even be passed in.
+
+   if (ref($nds) ne "ARRAY") {
+      die "ERROR: [_test_list_condition] impossible: non-list passed in\n";
+   }
+
+   # Test for defined/empty keys
+
+   if ($cond =~ /^(\!?)(defined|empty):(\d+)$/i) {
+      my ($not,$op,$i) = ($1,$2,$3);
+      my $def = (defined $$nds[$i]);
+
+      if (lc($op) eq "defined") {
+         return 1  if ( ($def  &&  ! $not) ||
+                        (! $def  &&  $not) );
+         return 0;
+      }
+
+      my $empty = 1;
+      $empty    = $self->empty([ $$nds[$i] ])  if ($def);
+
+      return 1  if ( ($empty  &&  ! $not) ||
+                     (! $empty  &&  $not) );
+      return 0;
+   }
+
+   # < <= = > >= tests
+
+   if ($cond =~ /^(\!?)(<=|<|=|>=|>):(\d+)$/) {
+      my($not,$op,$val) = ($1,$2,$3);
+      my $n = 0;
+      foreach my $v (@$nds) {
+         $n++  if (! $self->empty([ $v ]));
+      }
+
+      if      ($op eq "<") {
+         return 1  if ( ($n < $val  &&  ! $not) ||
+                        ($n >= $val  &&  $not) );
+         return 0;
+
+      } elsif ($op eq "<=") {
+         return 1  if ( ($n <= $val  &&  ! $not) ||
+                        ($n > $val  &&  $not) );
+         return 0;
+
+      } elsif ($op eq "=") {
+         return 1  if ( ($n == $val  &&  ! $not) ||
+                        ($n != $val  &&  $not) );
+         return 0;
+
+      } elsif ($op eq ">=") {
+         return 1  if ( ($n >= $val  &&  ! $not) ||
+                        ($n < $val  &&  $not) );
+         return 0;
+
+      } else {
+         return 1  if ( ($n > $val  &&  ! $not) ||
+                        ($n <= $val  &&  $not) );
+         return 0;
+      }
+   }
+
+   # contains condition
+
+   if ($cond =~ /^(\!?)contains:(.*)$/i) {
+      my($not,$val) = ($1,$2);
+      $val          = ""  if (! defined $val);
+      foreach my $v (@$nds) {
+         next  if (! defined $v);
+         if ($v eq $val) {
+            return 1  if (! $not);
+            return 0  if ($not);
+         }
+      }
+      return 0  if (! $not);
+      return 1;
+   }
+
+   # An empty list:
+   #   passes empty
+   #   fails  !empty
+   # A non-empty list:
+   #   fails  empty
+   #   passes !empty
+
+   my $c = lc($cond);
+   if ($self->empty([ $nds ])) {
+      return 1  if ($c eq "empty");
+      return 0  if ($c eq "!empty");
+   } else {
+      return 0  if ($c eq "empty");
+      return 1  if ($c eq "!empty");
+   }
+
+   # VAL test
+
+   my $not = 0;
+   $not    = 1 if ($cond =~ s/^\!//);
+
+   foreach my $v (@$nds) {
+      next  if (! defined $v);
+      if ($v eq $cond) {
+         return 1  if (! $not);
+         return 0  if ($not);
+      }
+   }
+   return 0  if (! $not);
+   return 1;
+}
+
+# If $path refers to a scalar, conditions may be any of the following:
+#
+#    defined      : true if the value is not defined
+#    empty        : true if the value is empty
+#    zero         : true if the value defined and evaluates to 0
+#    true         : true if the value defined and evaluates to true
+#    =:VAL        : true if the the value is VAL
+#    member:VAL:VAL:...
+#                 : true if the value is any of the values given (in
+#                   this case, ALL of the colons (including the first
+#                   one) can be replace by any other single character
+#                   separator
+#    VAL          : true if the value is equal to VAL
+#
+sub _test_scalar_condition {
+   my($self,$nds,$cond) = @_;
+
+   # An undefined value
+   #    passes !defined
+   #    passes !zero
+   #    passes !true
+   #    passes empty
+   #    passes !=:*
+   #    passes !member:*
+   #    fails  all others
+
+   if (! defined $nds) {
+      return 1  if ($cond =~ /^!defined$/i  ||
+                    $cond =~ /^empty$/i     ||
+                    $cond =~ /^\!zero$/i    ||
+                    $cond =~ /^\!true$/i    ||
+                    $cond =~ /^\!=:/        ||
+                    $cond =~ /^\!member/i);
+      return 0;
+   }
+
+   # A non-scalar element should not even be passed in.
+
+   if (ref($nds)) {
+      die "ERROR: [_test_scalar_condition] impossible: non-scalar passed in\n";
+   }
+
+   # A defined value
+   #    passes defined
+   #    fails  ! defined
+
+   my($c) = lc($cond);
+   return 1  if ($c eq "defined");
+   return 0  if ($c eq "!defined");
+
+   # An empty value (must pass it as a structure, NOT a scalar)
+   #    passes empty
+   #    fails  !empty
+   # A non-empty value
+   #    passes !empty
+   #    fails  empty
+
+   if ($self->empty([$nds])) {
+      return 1  if ($c eq "empty");
+      return 0  if ($c eq "!empty");
+   } else {
+      return 0  if ($c eq "empty");
+      return 1  if ($c eq "!empty");
+   }
+
+   $nds = ""  if (! defined $nds);
+
+   # zero and true tests
+
+   if      ($c eq "zero") {
+      return 1  if ($nds eq ""  ||  $nds == 0);
+      return 0;
+   } elsif ($c eq "!zero") {
+      return 0  if ($nds eq ""  ||  $nds == 0);
+      return 1;
+   } elsif ($c eq "true") {
+      return 1  if ($nds);
+      return 0;
+   } elsif ($c eq "!true") {
+      return 0  if ($nds);
+      return 1;
+   }
+
+   # = test
+
+   if ($cond =~ /^(\!?)=:(.*)/) {
+      my($not,$val) = ($1,$2);
+      $val = ""  if (! defined $val);
+      return 1  if ( ($nds eq $val  &&  ! $not)  ||
+                     ($nds ne $val  &&  $not) );
+      return 0;
+   }
+
+   # member test
+
+   if ($cond =~ /^(\!?)member(.)(.+)$/) {
+      my($not,$sep,$vals) = ($1,$2,$3);
+      my %tmp = map { (defined $_ ? $_ : ""),1 } split(/\Q$sep\E/,$vals);
+      return 1  if ( (exists $tmp{$nds}  &&  ! $not)  ||
+                     (! exists $tmp{$nds}  &&  $not) );
+      return 0;
+   }
+
+   # VAL test
+
+   if ($cond =~ s/^\!//) {
+      return 0  if ($nds eq $cond);
+      return 1;
+   }
+
+   return 1  if ($nds eq $cond);
+   return 0;
 }
 
 ###############################################################################

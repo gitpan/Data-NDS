@@ -38,6 +38,9 @@ t/runtests
 t/set_merge.t
 t/set_structure.t
 t/test.pl
+t/test_conditions.hash.t
+t/test_conditions.list.t
+t/test_conditions.scalar.t
 t/value.t
 t/values.t
 t/which_1.t

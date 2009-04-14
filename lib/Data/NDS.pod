@@ -858,10 +858,11 @@ Returns undef if an error occurs. Otherwise, it returns 1 if $nds is empty,
 
 =item value
 
-  $val = $obj->value($nds,$path [,$copy]);
+  $val = $obj->value($nds,$path [,$copy,$nocheck]);
 
 This checks to see that the NDS passed in is valid, and if the
-given path exists in it.
+given path exists in it. If $nocheck is passed in, the NDS structure
+isn't checked.
 
 If everything is valid, it returns the value stored at $path.  If
 $copy is passed in, a copy of the structure stored there is returned,
@@ -963,9 +964,11 @@ check_structure method.
 
 =back
 
-=head1 MERGE METHODS
+=head1 METHODS FOR MERGING OR SETTING VALUES IN AN NDS
 
-Methods for merging two NDSes together.
+These methods allow you to merge two NDSes together. A simple case of this is
+when a path in an NDS is not set. Merging in a second NDS is equivalent to
+simply setting the path in the first NDS to the value supplied.
 
 =over 4
 
@@ -1023,6 +1026,17 @@ passed in and is true.
 
 The actual value passed in (not a copy) will be merged in.
 
+The merge_path method is used whenever you want to perform the
+operation "set PATH in an NDS to VALUE". If PATH is not yet
+defined in NDS, the following call does the expected operation:
+
+  $obj->merge_path($nds,$val,$path [,$new]);
+
+If PATH already exists in NDS and you want to overwrite it, use
+the following:
+
+  $obj->merge_path($nds,$val,$path,"replace" [,$new]);
+
 =back
 
 =head1 OTHER METHODS
@@ -1047,6 +1061,53 @@ any one of them, it passes. Currently, @args may consist of a list of
 values (scalars) or regular expressions (set using the qr// operator).
 If the value at a path is equal to any of the values passed in in
 @args, or matches any of the regular expressions, then it passes.
+
+=item test_conditions
+
+  $flag = $obj->test_conditions($nds [,$path1,$cond1,$path2,$cond2,...]);
+
+This returns a 1 if the given NDS meets all of the conditions in the
+list.  Any number of path/cond pairs may be given, and the NDS is
+required to pass all of them.
+
+If $path refers to a hash structure, $cond may be any of the following:
+
+   exists:VAL   : true if a key named VAL exists in the hash
+   empty:VAL    : true if a key named VAL is empty in the hash
+                  (it doesn't exist, or has an empty value)
+   empty        : true if the hash is empty
+
+If $path refers to a list structure, $cond may be any of the following:
+
+   empty        : true if the list is empty
+   defined:VAL  : true if the VAL'th (VAL is an integer) element
+                  is defined (indices start at 0)
+   empty:VAL    : true if the VAL'th (VAL is an integer) element
+                  is empty (or not defined)
+   contains:VAL : true if the list contains the element VAL
+   <:VAL        : true if the list has fewer than VAL (an integer)
+                  non-empty elements
+   <=:VAL
+   =:VAL
+   >:VAL
+   >=:VAL
+   VAL          : equivalent to contains:VAL
+
+If $path refers to a scalar, $cond may be any of the following:
+
+   defined      : true if the value is defined
+   empty        : true if the value is empty
+   zero         : true if the value defined and evaluates to 0
+   true         : true if the value defined and evaluates to true
+   =:VAL        : true if the the value is VAL
+   member:VAL:VAL:...
+                : true if the value is any of the values given (in
+                  this case, ALL of the colons (including the first
+                  one) can be replace by any other single character
+                  separator
+   VAL          : equivalent to =:VAL
+
+All conditions can be prefixed by a "!" to negate it.
 
 =item identical, contains
 
@@ -1124,6 +1185,10 @@ and one of:
 It will return all paths which match all of the values.
 
 =back
+
+Any method not documented here, especially those beginning with an
+underscore (_), are for internal use only. Please do not use them.
+Absolutely no support is offered for them.
 
 =head1 ERROR CODES
 
@@ -1248,6 +1313,10 @@ The following error codes apply to identical and contains operations:
 
   ndside01   The first NDS is invalid.
   ndside02   The second NDS is invalid.
+
+The following error codes apply to test conditions:
+
+  ndscon01   An invalid test condition used.
 
 =head1 EXAMPLES
 
@@ -1756,6 +1825,42 @@ now documented which is which (and some behaviors were changed to
 be more consistent).
 
 =back
+
+=head1 BUGS AND QUESTIONS
+
+If you find a bug in this module, please send it directly to me (see
+the AUTHOR section below).  Alternately, you can submit it on CPAN. This
+can be done at the following URL:
+
+   http://rt.cpan.org/Public/Dist/Display.html?Name=Data-NDS
+
+Please do not use other means to report bugs (such as usenet newsgroups,
+or forums for a specific OS or linux distribution) as it is impossible
+for me to keep up with all of them.
+
+When filing a bug report, please include the following information:
+
+=over 4
+
+=item *
+
+The version of the module you are using.  You can get this by using
+the script:
+
+        use Data::NDS;
+        $obj = new Data::NDS;
+        print $obj->version(),"\n";
+
+=item *
+
+The output from "perl -V"
+
+=back
+
+If you have a problem using the module that perhaps isn't a bug (can't
+figure out the syntax, etc.), you're in the right place.  Go right back to
+the top of this manual and start reading.  If this still doesn't answer
+your question, mail me directly.
 
 =head1 KNOWN PROBLEMS
 
