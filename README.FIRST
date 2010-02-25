@@ -1,0 +1,23 @@
+After some discussion on the perl modules mailing list, I am registering
+this module under the name:
+
+   Data::Nested
+
+The original module name of the module was Data::NDS . I tried to
+register it under that name, but the maintainers of the module list
+felt that using an acronym (NDS) served to make the purpose of
+the module unclear.
+
+After some discussion, we agreed upon the name Data::Nested instead
+which should make it clear that this module works with nested data
+structures.
+
+Data::NDS 3.11 is the final version of Data::NDS and will likely
+be removed eventually. Please use the Data::Nested module instead.
+No bug fixes or added functionality will be made to the Data::NDS
+module.
+
+Switching from Data::NDS to Data::Nested is trivial since all of
+the methods remain unchanged. Simply change Data::NDS to Data::Nested
+everywhere it appears.  No other change should be required.
+

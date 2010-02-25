@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-# Copyright (c) 1996-2009 Sullivan Beck. All rights reserved.
+# Copyright (c) 1996-2010 Sullivan Beck. All rights reserved.
 # This program is free software; you can redistribute it and/or modify it
 # under the same terms as Perl itself.
 
@@ -28,8 +28,16 @@
 #             in.
 #
 # 2008-11-05  Slightly better handling of blank/undef in returned values.
+#
+# 2009-09-01  Added "-l" value to $runtests.
+#
+# 2009-09-30  Much better support for references.
+#
+# 2010-02-05  Fixed bug in passing tests as lists
 
 ###############################################################################
+
+use Storable qw(dclone);
 
 # Usage: test_Func($funcref,$tests,$runtests,@extra)=@_;
 #
@@ -73,10 +81,12 @@
 #    VAL
 #
 # It is valid to have a function with no arguments or with no return
-# value.  The "~" must be used:
+# value (or both).  The "~" must be used:
 #
 #    ARG1 ARG2 ... ARGn ~
+#
 #    ~ VAL1 VAL2 ... VALm
+#
 #    ~
 #
 # Leading and trailing space is ignored in the multi-line format.
@@ -84,6 +94,22 @@
 # If desired, any of the ARGs or VALs may be the word "_undef_" which
 # will be strictly interpreted as the perl undef value. The word "_blank_"
 # may also be used to designate a defined but empty string.
+#
+# They may also be (in the multiline format) of the form:
+#
+#   \ STRING           : a string reference
+#
+#   [] LIST            : a list reference (where LIST is a
+#                        comma separated list)
+#
+#   [SEP] LIST         : a list reference (where SEP is a
+#                        single character separator)
+#
+#   {} HASH            : a hash reference (where HASH is
+#                        a comma separated list)
+#
+#   {SEP} HASH         : a hash reference (where SEP is a
+#                        single character separator)
 #
 # Alternately, the tests can be passed in as a list reference:
 #    $tests = [
@@ -107,45 +133,59 @@
 #
 # If $runtests is a positive number, it runs runs all tests starting at
 # that value in a way suitable for running interactively.
-# 
+#
 # If $runtests is a negative number, it runs all tests starting at that
 # value, but providing feedback at each test.
 #
 # If $runtests is a string "=N" (where N is a number), it runs only
 # that test.
+#
+# If $runtests is the string "-l", it lists the tests and the expected
+# output without running any.
 
 sub test_Func {
    my($funcref,$tests,$runtests,@extra)=@_;
    my(@tests);
 
    $runtests     = 0  if (! $runtests);
-   my($starttest,$feedback,$endtest);
+   my($starttest,$feedback,$endtest,$runtest);
    if      ($runtests eq "0"  or  $runtests eq "-0") {
       $starttest = 1;
       $feedback  = 1;
       $endtest   = 0;
+      $runtest   = 1;
    } elsif ($runtests =~ /^\d+$/){
       $starttest = $runtests;
       $feedback  = 0;
       $endtest   = 0;
+      $runtest   = 1;
    } elsif ($runtests =~ /^-(\d+)$/) {
       $starttest = $1;
       $feedback  = 1;
       $endtest   = 0;
+      $runtest   = 1;
    } elsif ($runtests =~ /^=(\d+)$/) {
       $starttest = $1;
       $feedback  = 1;
       $endtest   = $1;
+      $runtest   = 1;
+   } elsif ($runtests eq "-l") {
+      $starttest = 1;
+      $feedback  = 1;
+      $endtest   = 0;
+      $runtest   = 0;
    } else {
       die "ERROR: unknown argument(s): $runtests";
    }
 
+   my($tests_as_list) = 0;
    if (ref($tests) eq "ARRAY") {
-      @tests = @$tests;
+      @tests   = @$tests;
+      $tests_as_list = 1;
 
    } else {
       # Separate tests.
-  
+
       my($comment)="#";
       my(@lines)=split(/\n/,$tests);
       my(@test);
@@ -154,12 +194,12 @@ sub test_Func {
          $line =~ s/^\s*//;
          $line =~ s/\s*$//;
          next  if ($line =~ /^$comment/);
-  
+
          if ($line ne "") {
             push(@test,$line);
             next;
          }
-  
+
          if (@test) {
             push(@tests,[ @test ]);
             @test=();
@@ -168,16 +208,16 @@ sub test_Func {
       if (@test) {
          push(@tests,[ @test ]);
       }
-  
+
       # Get arg/val lists for each test.
-  
+
       foreach my $test (@tests) {
          my(@tmp)=@$test;
          my(@arg,@val);
-  
+
          # single line test
          @tmp = split(/\s+/,$tmp[0])  if ($#tmp == 0);
-  
+
          my($sep)=-1;
          my($i);
          for ($i=0; $i<=$#tmp; $i++) {
@@ -199,7 +239,7 @@ sub test_Func {
    }
 
    my($ntest)=$#tests + 1;
-   print "1..$ntest\n"  if ($feedback);
+   print "1..$ntest\n"  if ($feedback  &&  $runtest);
 
    my(@t);
    if ($endtest) {
@@ -209,73 +249,54 @@ sub test_Func {
    }
 
    foreach my $t (@t) {
-      $::testnum = $t;
-      my @arg = @{ $tests[$t-1][0] };
-      my @val = @{ $tests[$t-1][1] };
+      $::testnum  = $t;
 
-      # Handle undef/blank in args
-      my @tmparg = ();
-      foreach my $arg (@arg) {
-	 if (defined $arg  &&  $arg eq "_undef_") {
-	    push(@tmparg,undef);
-	 } elsif (defined $arg  &&  $arg eq "_blank_") {
-	    push(@tmparg,"");
-	 } else {
-	    push(@tmparg,$arg);
-	 }
+      my (@arg);
+      if ($tests_as_list) {
+         @arg     = @{ $tests[$t-1][0] };
+      } else {
+         my $arg  = dclone($tests[$t-1][0]);
+         @arg     = @$arg;
+         print_to_vals(\@arg);
       }
 
-      # Handle undef/blank in extra
-      my @tmpextra = ();
-      foreach my $arg (@extra) {
-	 if ($arg eq "_undef_") {
-	    push(@tmpextra,undef);
-	 } elsif ($arg eq "_blank_") {
-	    push(@tmpextra,"");
-	 } else {
-	    push(@tmpextra,$arg);
-	 }
-      }
+      my $argprt  = dclone(\@arg);
+      my @argprt  = @$argprt;
+      vals_to_print(\@argprt);
 
-      my @ans = &$funcref(@tmparg,@tmpextra);
+      my $exp     = dclone($tests[$t-1][1]);
+      my @exp     = @$exp;
+      print_to_vals(\@exp);
+      vals_to_print(\@exp);
 
-      # Handle undef/blank in ans
-      foreach my $ans (@ans) {
-         $ans = "_undef_"  if (! defined $ans);
-         $ans = "_blank_"  if ($ans eq "");
-      }
+      # Run the test
 
-      foreach my $ans (@ans) {
-         if (defined $ans) {
-            if (ref $ans eq "SCALAR") {
-               $ans = $$ans;
-            } elsif (ref $ans eq "ARRAY") {
-               $ans = join(" ","[",join(", ",@$ans),"]");
-               $ans =~ s/  +/ /g;
-            } elsif (ref $ans eq "HASH") {
-               $ans = join(" ","{",
-                           join(", ",map { "$_ => ".$$ans{$_} }
-                                (sort keys %$ans)), "}");
-               $ans =~ s/  +/ /g;
-            }
-         } else {
-	    $ans = "";
-	 }
+      my ($ans,@ans);
+      if ($runtest) {
+         @ans = &$funcref(@arg,@extra);
       }
+      vals_to_print(\@ans);
+
+      # Compare the results
 
       foreach my $arg (@arg) {
          $arg = "_undef_"  if (! defined $arg);
          $arg = "_blank_"  if ($arg eq "");
       }
-      my $arg = join("\n           ",@arg,@extra);
-      my $ans = join("\n           ",@ans);
-      my $val = join("\n           ",@val);
+      $arg = join("\n           ",@argprt,@extra);
+      $ans = join("\n           ",@ans);
+      $exp = join("\n           ",@exp);
 
-      if ($ans ne $val) {
+      if (! $runtest) {
+         print "########################\n";
+         print "Test     = $t\n";
+         print "Args     = $arg\n";
+         print "Expected = $exp\n";
+      } elsif ($ans ne $exp) {
          print "not ok $t\n";
          warn "########################\n";
          warn "Args     = $arg\n";
-         warn "Expected = $val\n";
+         warn "Expected = $exp\n";
          warn "Got      = $ans\n";
          warn "########################\n";
       } else {
@@ -301,7 +322,7 @@ sub test_Func {
 sub test_File {
    my($funcref,$files,$runtests,@extra)=@_;
    my(@files)=@$files;
-  
+
    $runtests=0  if (! $runtests);
 
    my($ntest)=$#files + 1;
@@ -360,6 +381,86 @@ sub test_File {
       }
 
       print "ok $t\n"  if (! $runtests);
+   }
+}
+
+# Converts a printable version of arguments to actual arguments
+sub print_to_vals {
+   my($listref) = @_;
+
+   foreach my $arg (@$listref) {
+      next  if (! defined($arg));
+      if ($arg eq "_undef_") {
+         $arg = undef;
+
+      } elsif ($arg eq "_blank_") {
+         $arg = "";
+
+      } elsif ($arg =~ /^\\\s*(.*)/) {
+         $str = $1;
+         $arg = \$str;
+
+      } elsif ($arg =~ /^\[(.?)\]\s*(.*)/) {
+         my($sep,$str) = ($1,$2);
+         $sep = ","  if (! $sep);
+         my @list = split(/\Q$sep\E/,$str);
+         foreach my $e (@list) {
+            $e = ""     if ($e eq "_blank_");
+            $e = undef  if ($e eq "_undef_");
+         }
+         $arg = \@list;
+
+      } elsif ($arg =~ /^\{(.?)\}\s*(.*)/) {
+         my($sep,$str) = ($1,$2);
+         $sep = ","  if (! $sep);
+         my %hash = split(/\Q$sep\E/,$str);
+         foreach my $key (keys %hash) {
+            my $val = $hash{$key};
+            $hash{$key} = undef  if ($val eq "_undef_");
+            $hash{$key} = ""     if ($val eq "_blank_");
+         }
+         $arg = \%hash;
+      }
+   }
+}
+
+# Converts arguments to a printable version.
+sub vals_to_print {
+   my($listref) = @_;
+
+   foreach my $arg (@$listref) {
+      if (! defined $arg) {
+         $arg = "_undef_";
+
+      } elsif (! ref($arg)) {
+         $arg = "_blank_"  if ($arg eq "");
+
+      } else {
+         my $ref = ref($arg);
+         if      ($ref eq "SCALAR") {
+            $arg = "\\ $$arg";
+
+         } elsif ($ref eq "ARRAY") {
+            my @list = @$arg;
+            foreach my $e (@list) {
+               $e = "_undef_", next   if (! defined($e));
+               $e = "_blank_"         if ($e eq "");
+            }
+            $arg = join(" ","[",join(", ",@list),"]");
+
+         } elsif ($ref eq "HASH") {
+            %hash = %$arg;
+            foreach my $key (keys %hash) {
+               my $val = $hash{$key};
+               $hash{$key} = "_undef_", next  if (! defined($val));
+               $hash{$key} = "_blank_"        if ($val eq "_blank_");
+            }
+            $arg = join(" ","{",
+                        join(", ",map { "$_ => $hash{$_}" }
+                             (sort keys %hash)), "}");
+            $arg =~ s/  +/ /g;
+         }
+      }
    }
 }
 

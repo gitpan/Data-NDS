@@ -6,6 +6,14 @@ SYNOPSIS
       $obj = new Data::NDS;
 
 DESCRIPTION
+    *** NOTE ***
+
+    At the suggestion of the perl module list maintainers, this module has
+    been renamed Data::Nested to make it's purpose clear from the name. All
+    future versions will be distributed under that name.
+
+    *** END NOTE ***
+
     This module contains methods for working with a perl nested data
     structure (NDS). Before using this module, it is assumed that the
     programmer is completely familiar with perl data structures. If this is
@@ -1662,6 +1670,21 @@ EXAMPLES
                         c => 33 }
 
 BACKWARDS INCOMPATIBILITIES
+    3.11
+        Renamed the module.
+
+        The original name of the module was Data::NDS. When I tried to
+        register that name with the perl module list, they felt that using
+        an acronym (NDS) did not make the module's purpose clear, and
+        requested that I give it a name that made it clear what the module
+        did.
+
+        After some discussion, Data::Nested was chosen.
+
+        Data::Nested is completely backward compatible with Data::NDS, and
+        switching Data::NDS to Data::Nested everywhere it appears is the
+        only change necessary.
+
     3.00
         The structure method was removed and replaced with a no_structure
         method.

@@ -1,5 +1,5 @@
 package Data::NDS;
-# Copyright (c) 2008-2009 Sullivan Beck. All rights reserved.
+# Copyright (c) 2008-2010 Sullivan Beck. All rights reserved.
 # This program is free software; you can redistribute it and/or modify it
 # under the same terms as Perl itself.
 
@@ -40,7 +40,7 @@ use IO::File;
 use warnings;
 
 use vars qw($VERSION);
-$VERSION = "3.10";
+$VERSION = "3.11";
 
 use vars qw($_DBG $_DBG_INDENT $_DBG_OUTPUT $_DBG_FH $_DBG_POINT);
 $_DBG        = 0;

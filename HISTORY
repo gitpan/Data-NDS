@@ -2,12 +2,14 @@
 # HISTORY
 ########################################################################
 
+Data::NDS
+=========
+
 Version 1.00   2008-02-27
    Initial release
 
 Version 1.01   2008-05-05
    Fixed bug where merge ignored the $new=1 arg. Ashley Hindmarsh
-      <ahindmar@office.caiw.nl>
    Added identical and contains methods
    keys and values now only return non-empty elements
    Added value method
@@ -43,9 +45,22 @@ Version 3.00  2009-03-02
       different return values).
 
 Version 3.10  2009-04-14
-   Some docs imporovments prompted by Michael <dobermann132@gmail.com>.
+   Some docs imporovments prompted by Michael
    Added test_conditions method (previously an internal only part of
       the Multiele module).
+
+Version 3.11  2010-02-25
+   Renamed the module to Data::Nested .  3.11 is the final version of
+      Data::NDS .
+
+Data::Nested
+============
+
+Version 3.11  2010-02-25
+   Renamed the module Data::NDS to Data::Nested .  3.11 is the final
+      version of Data::NDS and the first version of Data::Nested .
+
+Version 3.12
 
 ########################################################################
 # BACKWARDS INCOMPATIBILITIES
@@ -62,4 +77,8 @@ Version 3.10
    The API of the 3.10 series is backward compatible with 3.00, but
    due to changes in the internals, the 3.10 Data::NDS module is
    required for the 3.10 version of other Data::NDS::* modules.
+
+Version 3.11
+   Renamed the module at the suggestion of the perl module list
+   maintainers.
 

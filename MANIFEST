@@ -1,12 +1,14 @@
 Build.PL
 examples/README.examples
 HISTORY
+INSTALL
 lib/Data/NDS.pm
 lib/Data/NDS.pod
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
 README
+README.FIRST
 t/check_structure.t
 t/check_value.t
 t/delim.t
@@ -35,6 +37,7 @@ t/pod_coverage.t
 t/ruleset.t
 t/ruleset_valid.t
 t/runtests
+t/runtests.bat
 t/set_merge.t
 t/set_structure.t
 t/test.pl
